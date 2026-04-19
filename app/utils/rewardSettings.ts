@@ -3,6 +3,8 @@ export type RewardPreset = {
   amount: string;
 };
 
+const WILDCARD_TOKEN = "WILDCARD";
+
 export type RewardSettings = {
   presetText: string;
 };
@@ -27,6 +29,19 @@ export function parseRewardPresetText(input: string): RewardPreset[] {
 
       return [{ token, amount }];
     });
+}
+
+export function isWildcardRewardPreset(reward: RewardPreset): boolean {
+  return reward.token === WILDCARD_TOKEN;
+}
+
+export function countRewardMarkdownEntries(
+  rewards: RewardPreset[],
+  winnerCount: number
+): number {
+  return rewards
+    .slice(0, Math.min(rewards.length, winnerCount))
+    .filter((reward) => !isWildcardRewardPreset(reward)).length;
 }
 
 export function readRewardSettings(): RewardSettings {
@@ -67,6 +82,10 @@ export function buildRewardMarkdown(
 
   return rewards
     .slice(0, matched)
-    .map((reward, idx) => `${reward.token}:${reward.amount}:${winners[idx].address}`)
+    .flatMap((reward, idx) =>
+      isWildcardRewardPreset(reward)
+        ? []
+        : [`${reward.token}:${reward.amount}:${winners[idx].address}`]
+    )
     .join(",");
 }

@@ -73,6 +73,8 @@ import {
 } from "./utils/vineReputation/tiers";
 import {
   buildRewardMarkdown,
+  countRewardMarkdownEntries,
+  isWildcardRewardPreset,
   parseRewardPresetText,
   readRewardSettings,
   writeRewardSettings,
@@ -303,6 +305,14 @@ const ReputationLeaderboard: FC<ReputationLeaderboardProps> = (props) => {
   const rewardMarkdown = useMemo(() => buildRewardMarkdown(rewardPresets, winners), [rewardPresets, winners]);
   const rewardMarkdownReady = rewardPresets.length > 0 && winners.length >= rewardPresets.length;
   const rewardAssignmentsCount = Math.min(rewardPresets.length, winners.length);
+  const rewardMarkdownEntriesCount = useMemo(
+    () => countRewardMarkdownEntries(rewardPresets, winners.length),
+    [rewardPresets, winners.length]
+  );
+  const wildcardCount = useMemo(
+    () => rewardPresets.filter((reward) => isWildcardRewardPreset(reward)).length,
+    [rewardPresets]
+  );
 
   const winnerRef = useRef<string>("");
   useEffect(() => { winnerRef.current = winner; }, [winner]);
@@ -1786,8 +1796,8 @@ const handleGetRaffleSelection = () => {
                 onChange={(e) => handleRewardPresetChange(e.target.value)}
                 helperText={
                   rewardPresets.length > 0
-                    ? `${rewardPresets.length} rewards configured in this browser. ${rewardAssignmentsCount}/${rewardPresets.length} assigned to winners.`
-                    : "Optional. Browser-only format: TOKEN:AMOUNT,TOKEN:AMOUNT"
+                    ? `${rewardPresets.length} draw slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} winners assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
+                    : "Optional. Browser-only format: TOKEN:AMOUNT,TOKEN:AMOUNT or WILDCARD:1"
                 }
                 sx={{
                   "& .MuiOutlinedInput-root": {
