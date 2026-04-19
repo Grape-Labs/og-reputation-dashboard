@@ -1826,25 +1826,6 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
 
                   {rewardMarkdown && (
                     <Box sx={{ mt: 1 }}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={handleCopyRewardMarkdown}
-                        startIcon={<FileCopyIcon sx={{ fontSize: 15 }} />}
-                        sx={{
-                          mb: 1,
-                          textTransform: "none",
-                          borderColor: "rgba(148,163,184,0.55)",
-                          color: "rgba(248,250,252,0.95)",
-                          "&:hover": {
-                            borderColor: "rgba(191,219,254,0.9)",
-                            background: "rgba(30,64,175,0.18)",
-                          },
-                        }}
-                      >
-                        Copy reward markdown
-                      </Button>
-
                       <Typography
                         variant="caption"
                         sx={{
