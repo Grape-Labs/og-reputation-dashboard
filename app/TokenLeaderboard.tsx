@@ -65,6 +65,12 @@ import {
   formatAmount,
   getFormattedNumberToLocale,
 } from "./utils/grapeTools/helpers";
+import {
+  buildRewardMarkdown,
+  parseRewardPresetText,
+  readRewardSettings,
+  writeRewardSettings,
+} from "./utils/rewardSettings";
 
 import VineReputation from "./VineReputation";
 
@@ -205,9 +211,11 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
   const componentRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [markdownCopied, setMarkdownCopied] = useState(false);
+  const [rewardMarkdownCopied, setRewardMarkdownCopied] = useState(false);
   const [streamMode, setStreamMode] = useState(false);
   const [showRandomizer, setShowRandomizer] = useState(false);
   const [csvCopied, setCsvCopied] = useState(false);
+  const [rewardPresetText, setRewardPresetText] = useState<string>(() => readRewardSettings().presetText);
 
   const [highlightedAddress, setHighlightedAddress] = useState<string | null>(
     null
@@ -238,6 +246,17 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
   const [timestamp, setTimestamp] = useState<string>(""); // last draw timestamp (string)
   const [winners, setWinners] = useState<WinnerEntry[]>([]);
   const currentWinner = winners[winners.length - 1] ?? null;
+  const rewardPresets = React.useMemo(
+    () => parseRewardPresetText(rewardPresetText),
+    [rewardPresetText]
+  );
+  const rewardMarkdown = React.useMemo(
+    () => buildRewardMarkdown(rewardPresets, winners),
+    [rewardPresets, winners]
+  );
+  const rewardMarkdownReady =
+    rewardPresets.length > 0 && winners.length >= rewardPresets.length;
+  const rewardAssignmentsCount = Math.min(rewardPresets.length, winners.length);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -381,6 +400,27 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
     setTargetDrawCount(clamped);
   };
 
+  useEffect(() => {
+    const recompute = () => setRewardPresetText(readRewardSettings().presetText);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "grape_reward_settings_v1") recompute();
+    };
+
+    window.addEventListener("grape:reward-settings", recompute as any);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      window.removeEventListener("grape:reward-settings", recompute as any);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (rewardPresets.length > 0) {
+      setTargetDrawCount(rewardPresets.length);
+    }
+  }, [rewardPresets.length]);
+
   // --- LEADERBOARD STATS ---
   const effectiveHolders = holders.filter(
     (h) => h?.address && !excludeArr.includes(h.address)
@@ -451,6 +491,31 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
       setMarkdownCopied(true);
     } catch (err) {
       console.error("Failed to copy markdown:", err);
+    }
+  };
+
+  const handleRewardPresetChange = (raw: string) => {
+    setRewardPresetText(raw);
+    writeRewardSettings({ presetText: raw });
+  };
+
+  const handleCopyRewardMarkdown = async () => {
+    if (!rewardMarkdownReady || !rewardMarkdown) return;
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(rewardMarkdown);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = rewardMarkdown;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setRewardMarkdownCopied(true);
+    } catch (err) {
+      console.error("Failed to copy reward markdown:", err);
     }
   };
 
@@ -1537,6 +1602,26 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                               </IconButton>
                             </Tooltip>
 
+                            {rewardPresets.length > 0 && (
+                              <Tooltip
+                                title={
+                                  rewardMarkdownReady
+                                    ? "Copy reward markdown"
+                                    : `Reward markdown unlocks after ${rewardPresets.length} draws`
+                                }
+                              >
+                                <span>
+                                  <IconButton
+                                    sx={{ color: "white", mr: 0.2 }}
+                                    onClick={handleCopyRewardMarkdown}
+                                    disabled={!rewardMarkdownReady}
+                                  >
+                                    <ConfirmationNumberIcon fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
+
                             <Typography
                               variant="caption"
                               sx={{ opacity: 0.8, whiteSpace: "nowrap" }}
@@ -1688,6 +1773,63 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
 
                   </Box>
                 )}
+
+                <Box
+                  sx={{
+                    mt: 2,
+                    p: 1.5,
+                    borderRadius: "14px",
+                    background: "rgba(15,23,42,0.7)",
+                    border: "1px solid rgba(148,163,184,0.28)",
+                    maxWidth: 680,
+                  }}
+                >
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Reward markdown preset"
+                    placeholder="SKR:353,BONK:1444000"
+                    value={rewardPresetText}
+                    onChange={(e) => handleRewardPresetChange(e.target.value)}
+                    helperText={
+                      rewardPresets.length > 0
+                        ? `${rewardPresets.length} rewards configured in this browser. ${rewardAssignmentsCount}/${rewardPresets.length} assigned to winners.`
+                        : "Optional. Browser-only format: TOKEN:AMOUNT,TOKEN:AMOUNT"
+                    }
+                    sx={{
+                      "& .MuiOutlinedInput-root": {
+                        color: "rgba(248,250,252,0.95)",
+                        background: "rgba(15,23,42,0.55)",
+                      },
+                      "& .MuiOutlinedInput-notchedOutline": {
+                        borderColor: "rgba(148,163,184,0.55)",
+                      },
+                      "& .MuiFormHelperText-root": {
+                        color: "rgba(226,232,240,0.72)",
+                        mx: 0,
+                      },
+                      "& .MuiInputLabel-root": {
+                        color: "rgba(226,232,240,0.8)",
+                      },
+                    }}
+                  />
+
+                  {rewardMarkdown && (
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        mt: 1,
+                        display: "block",
+                        opacity: 0.82,
+                        fontFamily:
+                          '"Roboto Mono","SFMono-Regular",ui-monospace,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace',
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {rewardMarkdown}
+                    </Typography>
+                  )}
+                </Box>
               </Box>
 
               {/* Actions: draw + reset (simple) */}
@@ -2509,6 +2651,16 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
               Markdown copied!
             </Alert>
           </Snackbar>
+
+      <Snackbar
+        open={rewardMarkdownCopied}
+        autoHideDuration={2000}
+        onClose={() => setRewardMarkdownCopied(false)}
+      >
+        <Alert onClose={() => setRewardMarkdownCopied(false)} severity="success">
+          Reward markdown copied!
+        </Alert>
+      </Snackbar>
 
       <Snackbar
         open={csvCopied}
