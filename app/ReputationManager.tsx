@@ -109,6 +109,15 @@ function shorten(pk: string, a = 6, b = 6) {
   return `${pk.slice(0, a)}…${pk.slice(-b)}`;
 }
 
+function isValidPublicKey(value: string) {
+  try {
+    new PublicKey(value.trim());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function extractTxErrorMessage(e: any) {
   const parts: string[] = [];
   const seen = new Set<string>();
@@ -434,8 +443,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   const [closeRepUser, setCloseRepUser] = useState<string>("");
   const [closeRepSeason, setCloseRepSeason] = useState<number>(0);
 
-  const [closeMetaRecipient, setCloseMetaRecipient] = useState<string>("");
-
   // loaded state
   const [loading, setLoading] = useState(false);
   const [cfg, setCfg] = useState<ReputationConfigAccount | null>(null);
@@ -542,7 +549,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     setCloseConfirm("");
     setCloseRepUser("");
     setCloseRepSeason(0);
-    setCloseMetaRecipient(publicKey?.toBase58() || "");
   }, [
     open,
     daoIdBase58,
@@ -1570,6 +1576,8 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       });
 
       return [ix];
+    }, {
+      onConfirmed: () => setCloseRepUser(""),
     });
   };
 
@@ -1580,7 +1588,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       if (!isAuthority) throw new Error("Only authority can close metadata");
 
       const recipientPk = new PublicKey(
-        (closeMetaRecipient || "").trim() || publicKey.toBase58()
+        closeRecipient.trim() || publicKey.toBase58()
       );
 
       return [
@@ -1590,6 +1598,8 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
           recipient: recipientPk,
         }),
       ];
+    }, {
+      onConfirmed: () => setMeta(null),
     });
   };
 
@@ -1609,6 +1619,22 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     Number.isFinite(initialSeason) &&
     initialSeason > 0 &&
     initialSeason <= 65535;
+
+  const closeExpected = daoPk ? `CLOSE ${shorten(daoPk.toBase58(), 6, 6)}` : "";
+  const validCloseRecipient = isValidPublicKey(closeRecipient);
+  const validCloseRepUser = isValidPublicKey(closeRepUser);
+  const validCloseRepSeason =
+    Number.isFinite(closeRepSeason) && closeRepSeason > 0 && closeRepSeason <= 65535;
+  const canCloseUserRep =
+    isAuthority && !submitting && validCloseRecipient && validCloseRepUser && validCloseRepSeason;
+  const canCloseMetadata =
+    isAuthority && !submitting && validCloseRecipient && !!meta;
+  const canCloseSpace =
+    isAuthority &&
+    !submitting &&
+    validCloseRecipient &&
+    !!closeExpected &&
+    closeConfirm.trim() === closeExpected;
 
   return (
     <>
@@ -2347,149 +2373,139 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
                 {/* ---------------- Danger ---------------- */}
                 <TabPanel value={tab} index={6}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                    Danger zone
-                  </Typography>
-
-                  <Alert severity="warning" sx={{ borderRadius: "14px", mb: 2 }}>
-                    Closing accounts is irreversible. Use carefully.
-                  </Alert>
-
                   <Box sx={{ display: "grid", gap: 2 }}>
-                    {/* Close config */}
-                    <Box
-                      sx={{
-                        p: 1.5,
-                        borderRadius: "16px",
-                        border: "1px solid rgba(239,68,68,0.35)",
-                        background: "rgba(239,68,68,0.08)",
-                      }}
-                    >
-                      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                        Close space (config)
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 750 }}>
+                        Destructive actions
                       </Typography>
-
-                      <TextField
-                        label="Recipient (receives rent)"
-                        value={closeRecipient}
-                        onChange={(e) => setCloseRecipient(e.target.value)}
-                        disabled={submitting}
-                        InputProps={{ sx: glassFieldSx }}
-                        sx={{ mb: 1.2 }}
-                      />
-
-                      <TextField
-                        label="Type to confirm"
-                        value={closeConfirm}
-                        onChange={(e) => setCloseConfirm(e.target.value)}
-                        disabled={submitting}
-                        InputProps={{ sx: glassFieldSx }}
-                        helperText={`Type: CLOSE ${shorten(daoPk?.toBase58() || "", 6, 6)}`}
-                        FormHelperTextProps={{ sx: { opacity: 0.7 } }}
-                        sx={{ mb: 1.2 }}
-                      />
-
-                      <Button
-                        onClick={handleCloseSpace}
-                        disabled={!isAuthority || submitting || !closeRecipient.trim()}
-                        variant="contained"
-                        sx={{
-                          ...glassPrimaryBtnSx,
-                          background: "rgba(239,68,68,0.22)",
-                          border: "1px solid rgba(239,68,68,0.35)",
-                          "&:hover": { background: "rgba(239,68,68,0.28)" },
-                        }}
-                      >
-                        Close space
-                      </Button>
+                      <Typography variant="body2" sx={{ mt: 0.4, opacity: 0.7 }}>
+                        Permanently close on-chain accounts and return their rent balance.
+                      </Typography>
                     </Box>
 
-                    {/* Close user reputation */}
+                    <Alert severity="error" sx={{ borderRadius: "12px" }}>
+                      These actions cannot be undone. Close member and metadata accounts before
+                      closing the entire space.
+                    </Alert>
+
+                    <TextField
+                      label="Rent recipient wallet"
+                      value={closeRecipient}
+                      onChange={(e) => setCloseRecipient(e.target.value)}
+                      disabled={submitting}
+                      error={!!closeRecipient.trim() && !validCloseRecipient}
+                      helperText={
+                        validCloseRecipient
+                          ? "Recovered SOL from every action below will be sent here."
+                          : "Enter a valid Solana wallet before enabling destructive actions."
+                      }
+                      InputProps={{ sx: glassFieldSx }}
+                    />
+
                     <Box
                       sx={{
-                        p: 1.5,
-                        borderRadius: "16px",
-                        border: "1px solid rgba(245,158,11,0.35)",
-                        background: "rgba(245,158,11,0.08)",
+                        display: "grid",
+                        gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" },
+                        gap: 1.5,
                       }}
                     >
-                      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                        Close a user reputation account
-                      </Typography>
+                      <Box sx={{ p: 2, borderRadius: "14px", border: "1px solid rgba(245,158,11,0.28)", background: "rgba(245,158,11,0.06)" }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          Member score account
+                        </Typography>
+                        <Typography variant="caption" sx={{ display: "block", mt: 0.4, mb: 1.5, opacity: 0.68 }}>
+                          Removes one wallet’s reputation account for a specific season.
+                        </Typography>
+                        <Box sx={{ display: "grid", gap: 1.2 }}>
+                          <TextField
+                            label="Member wallet"
+                            value={closeRepUser}
+                            onChange={(e) => setCloseRepUser(e.target.value)}
+                            disabled={submitting}
+                            error={!!closeRepUser.trim() && !validCloseRepUser}
+                            helperText={closeRepUser.trim() && !validCloseRepUser ? "Invalid wallet" : " "}
+                            InputProps={{ sx: glassFieldSx }}
+                          />
+                          <TextField
+                            label="Season"
+                            type="number"
+                            value={closeRepSeason}
+                            onChange={(e) => setCloseRepSeason(Number(e.target.value) || 0)}
+                            disabled={submitting}
+                            error={!validCloseRepSeason}
+                            helperText={`Current season: ${cfg.currentSeason}`}
+                            InputProps={{ sx: glassFieldSx }}
+                          />
+                          <Button
+                            onClick={handleCloseUserReputation}
+                            disabled={!canCloseUserRep}
+                            variant="outlined"
+                            color="warning"
+                            fullWidth
+                            sx={{ textTransform: "none", borderRadius: "10px", py: 1 }}
+                          >
+                            Close member account
+                          </Button>
+                        </Box>
+                      </Box>
 
-                      <TextField
-                        label="User wallet"
-                        value={closeRepUser}
-                        onChange={(e) => setCloseRepUser(e.target.value)}
-                        disabled={submitting}
-                        InputProps={{ sx: glassFieldSx }}
-                        sx={{ mb: 1.2 }}
-                      />
-
-                      <TextField
-                        label="Season"
-                        type="number"
-                        value={closeRepSeason}
-                        onChange={(e) => setCloseRepSeason(Number(e.target.value) || 0)}
-                        disabled={submitting}
-                        InputProps={{ sx: glassFieldSx }}
-                        helperText={`Default: current season (${cfg.currentSeason})`}
-                        FormHelperTextProps={{ sx: { opacity: 0.7 } }}
-                        sx={{ mb: 1.2 }}
-                      />
-
-                      <Button
-                        onClick={handleCloseUserReputation}
-                        disabled={!isAuthority || submitting || !closeRepUser.trim()}
-                        variant="contained"
-                        sx={{
-                          ...glassPrimaryBtnSx,
-                          background: "rgba(245,158,11,0.20)",
-                          border: "1px solid rgba(245,158,11,0.35)",
-                          "&:hover": { background: "rgba(245,158,11,0.26)" },
-                        }}
-                      >
-                        Close user reputation
-                      </Button>
+                      <Box sx={{ p: 2, borderRadius: "14px", border: "1px solid rgba(245,158,11,0.28)", background: "rgba(245,158,11,0.06)" }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          Project metadata account
+                        </Typography>
+                        <Typography variant="caption" sx={{ display: "block", mt: 0.4, mb: 1.5, opacity: 0.68 }}>
+                          Removes the project name, imagery, description, and external links.
+                        </Typography>
+                        <Box sx={{ display: "grid", gap: 1.2 }}>
+                          <Box sx={{ p: 1.25, minHeight: 56, borderRadius: "10px", background: "rgba(2,6,23,0.32)", border: "1px solid rgba(148,163,184,0.14)" }}>
+                            <Typography variant="caption" sx={{ opacity: 0.6 }}>Current status</Typography>
+                            <Typography variant="body2" sx={{ mt: 0.2, fontWeight: 650 }}>
+                              {meta ? "Metadata account exists" : "No metadata account found"}
+                            </Typography>
+                          </Box>
+                          <Button
+                            onClick={handleCloseProjectMeta}
+                            disabled={!canCloseMetadata}
+                            variant="outlined"
+                            color="warning"
+                            fullWidth
+                            sx={{ textTransform: "none", borderRadius: "10px", py: 1 }}
+                          >
+                            Close metadata account
+                          </Button>
+                        </Box>
+                      </Box>
                     </Box>
 
-                    {/* Close project meta */}
-                    <Box
-                      sx={{
-                        p: 1.5,
-                        borderRadius: "16px",
-                        border: "1px solid rgba(148,163,184,0.28)",
-                        background: "rgba(148,163,184,0.06)",
-                      }}
-                    >
-                      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                        Close project metadata account
+                    <Box sx={{ p: 2, borderRadius: "14px", border: "1px solid rgba(239,68,68,0.42)", background: "rgba(239,68,68,0.08)" }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 750, color: "#fca5a5" }}>
+                        Close entire reputation space
                       </Typography>
-
-                      <TextField
-                        label="Recipient (receives rent)"
-                        value={closeMetaRecipient}
-                        onChange={(e) => setCloseMetaRecipient(e.target.value)}
-                        disabled={submitting}
-                        InputProps={{ sx: glassFieldSx }}
-                        sx={{ mb: 1.2 }}
-                      />
-
-                      <Button
-                        onClick={handleCloseProjectMeta}
-                        disabled={!isAuthority || submitting}
-                        variant="contained"
-                        sx={{
-                          ...glassPrimaryBtnSx,
-                          background: "rgba(148,163,184,0.16)",
-                          border: "1px solid rgba(148,163,184,0.30)",
-                          "&:hover": { background: "rgba(148,163,184,0.22)" },
-                        }}
-                      >
-                        Close project metadata
-                      </Button>
+                      <Typography variant="body2" sx={{ mt: 0.4, mb: 1.5, opacity: 0.72 }}>
+                        Removes the space configuration. Type the confirmation phrase exactly to
+                        unlock the final action.
+                      </Typography>
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr auto" }, gap: 1.2, alignItems: "start" }}>
+                        <TextField
+                          label="Confirmation phrase"
+                          value={closeConfirm}
+                          onChange={(e) => setCloseConfirm(e.target.value)}
+                          disabled={submitting}
+                          error={!!closeConfirm && closeConfirm.trim() !== closeExpected}
+                          helperText={<>Type exactly: <Box component="span" sx={{ fontFamily: "monospace", color: "rgba(248,250,252,0.9)" }}>{closeExpected}</Box></>}
+                          InputProps={{ sx: glassFieldSx }}
+                        />
+                        <Button
+                          onClick={handleCloseSpace}
+                          disabled={!canCloseSpace}
+                          variant="contained"
+                          color="error"
+                          sx={{ textTransform: "none", borderRadius: "10px", px: 2.5, py: 1.7, whiteSpace: "nowrap" }}
+                        >
+                          Close entire space
+                        </Button>
+                      </Box>
                     </Box>
-
                   </Box>
                 </TabPanel>
                   </Box>
