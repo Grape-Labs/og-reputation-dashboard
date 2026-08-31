@@ -20,7 +20,9 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  useMediaQuery,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import {
   Connection,
   PublicKey,
@@ -335,11 +337,13 @@ type ReputationManagerProps = {
 };
 
 const glassDialogPaperSx = {
-  borderRadius: "20px",
-  background: "rgba(15,23,42,0.86)",
+  borderRadius: "18px",
+  background: "rgba(10,18,32,0.96)",
   border: "1px solid rgba(148,163,184,0.28)",
-  backdropFilter: "blur(14px)",
+  boxShadow: "0 28px 80px rgba(0,0,0,0.48)",
+  backdropFilter: "blur(18px)",
   color: "rgba(248,250,252,0.95)",
+  minHeight: { md: "76vh" },
 };
 
 const glassFieldSx = {
@@ -388,6 +392,8 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   defaultMetadataUri = "",
   onChanged,
 }) => {
+  const theme = useTheme();
+  const desktopAdminNav = useMediaQuery(theme.breakpoints.up("md"), { noSsr: true });
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
 
@@ -1593,7 +1599,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
   const showAuthorityChip = spaceExists && cfg;
   const authLabel = cfg ? shorten(cfg.authority.toBase58()) : "";
-  const yourLabel = publicKey ? shorten(publicKey.toBase58()) : "";
 
   const canCreate =
     !submitting &&
@@ -1611,24 +1616,24 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
         open={open}
         onClose={safeClose}
         fullWidth
-        maxWidth="md"
+        maxWidth="lg"
         PaperProps={{ sx: glassDialogPaperSx }}
       >
-        <DialogTitle sx={{ pb: 1 }}>
+        <DialogTitle sx={{ px: { xs: 2, md: 3 }, py: 2, borderBottom: "1px solid rgba(148,163,184,0.16)" }}>
           <Box
             sx={{
               display: "flex",
-              alignItems: "baseline",
+              alignItems: "center",
               justifyContent: "space-between",
               gap: 2,
             }}
           >
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: 0.2 }}>
-                Reputation Manager
+              <Typography variant="h6" sx={{ fontWeight: 750, letterSpacing: 0.2 }}>
+                Reputation Admin
               </Typography>
               <Typography variant="caption" sx={{ opacity: 0.75 }}>
-                Space config + admin actions
+                Configure the space and manage member scores
               </Typography>
             </Box>
 
@@ -1637,7 +1642,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                 <Chip
                   size="small"
                   label={
-                    isAuthority ? `Authority: you (${yourLabel})` : `Authority: ${authLabel}`
+                    isAuthority ? "Admin access" : `Read only · ${authLabel}`
                   }
                   sx={{
                     borderRadius: "999px",
@@ -1652,7 +1657,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
               {spaceExists && cfg && (
                 <Chip
                   size="small"
-                  label={`Season ${cfg.currentSeason}`}
+                  label="Space active"
                   sx={{
                     borderRadius: "999px",
                     background: "rgba(56,189,248,0.14)",
@@ -1665,9 +1670,11 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
           </Box>
         </DialogTitle>
 
-        <DialogContent sx={{ pt: 2 }}>
-          <Box sx={{ display: "grid", gap: 1.5, mt: 2 }}>
-            
+        <DialogContent sx={{ p: { xs: 2, md: 3 } }}>
+          <Box sx={{ display: "grid", gap: 2 }}>
+            <Typography variant="overline" sx={{ opacity: 0.62, letterSpacing: 1.2 }}>
+              Space identifiers
+            </Typography>
             <Box
               sx={{
                 display: "grid",
@@ -1675,41 +1682,35 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                 gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
               }}
             >
-              <PkRow label="DAO Pubkey" value={daoPk?.toBase58() || ""} />
+              <PkRow label="DAO" value={daoPk?.toBase58() || ""} />
               <PkRow label="Config PDA" value={configPda?.toBase58() || ""} />
-              <PkRow label="Project Meta PDA" value={projectMetaPda?.toBase58() || ""} />
-              {/*<PkRow label="Program ID" value={VINE_REP_PROGRAM_ID.toBase58()} />*/}
-
-              <PkRow
-                  label="Authority"
-                  value={authorityPk?.toBase58() || ""}
-                  suffix={
-                    publicKey && authorityPk?.equals(publicKey)
-                      ? "you"
-                      : undefined
-                  }
-                />
+              <PkRow label="Metadata PDA" value={projectMetaPda?.toBase58() || ""} />
+              <PkRow label="Authority" value={authorityPk?.toBase58() || ""} suffix={isAuthority ? "you" : undefined} />
             </Box>
 
             {spaceExists && cfg ? (
               <Box
                 sx={{
                   display: "grid",
-                  gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
-                  gap: 1.5,
+                  gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" },
+                  gap: 1,
                 }}
               >
+                <Box sx={{ p: 1.5, borderRadius: "14px", background: "rgba(56,189,248,0.09)", border: "1px solid rgba(56,189,248,0.22)" }}>
+                  <Typography variant="caption" sx={{ opacity: 0.7 }}>Current season</Typography>
+                  <Typography variant="h6" sx={{ mt: 0.2, fontWeight: 750 }}>{cfg.currentSeason}</Typography>
+                </Box>
                 <Box
                   sx={{
                     p: 1.5,
-                    borderRadius: "16px",
+                    borderRadius: "14px",
                     background: "rgba(255,255,255,0.06)",
                     border: "1px solid rgba(255,255,255,0.12)",
                     backdropFilter: "blur(10px)",
                   }}
                 >
                   <Typography variant="caption" sx={{ opacity: 0.75 }}>
-                    Rep mint (current)
+                    Reputation mint
                   </Typography>
                   <Typography
                     variant="body2"
@@ -1719,7 +1720,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                   </Typography>
                 </Box>
 
-                <Box sx={{ p: 1.5, borderRadius: "16px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                <Box sx={{ p: 1.5, borderRadius: "14px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
                   <Typography variant="caption" sx={{ opacity: 0.75 }}>
                     Decay (per season)
                   </Typography>
@@ -1731,20 +1732,20 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                 <Box
                   sx={{
                     p: 1.5,
-                    borderRadius: "16px",
+                    borderRadius: "14px",
                     background: "rgba(255,255,255,0.06)",
                     border: "1px solid rgba(255,255,255,0.12)",
                     backdropFilter: "blur(10px)",
                   }}
                 >
                   <Typography variant="caption" sx={{ opacity: 0.75 }}>
-                    Metadata URI
+                    Metadata
                   </Typography>
                   <Typography
                     variant="body2"
                     sx={{ mt: 0.3, opacity: 0.9, wordBreak: "break-word" }}
                   >
-                    {meta?.metadataUri ? meta.metadataUri : "—"}
+                    {meta?.metadataUri ? "Configured" : "Not configured"}
                   </Typography>
                 </Box>
               </Box>
@@ -1808,26 +1809,64 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
             {spaceExists && cfg && (
               <>
-                <Divider sx={{ borderColor: "rgba(148,163,184,0.25)", mt: 0.5 }} />
-
-                <Tabs
-                  value={tab}
-                  onChange={(_, v) => setTab(v)}
+                <Box
                   sx={{
-                    "& .MuiTab-root": { textTransform: "none", minHeight: 42 },
-                    "& .MuiTabs-indicator": {
-                      backgroundColor: "rgba(56,189,248,0.9)",
-                    },
+                    display: "grid",
+                    gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "210px minmax(0, 1fr)" },
+                    border: "1px solid rgba(148,163,184,0.18)",
+                    borderRadius: "16px",
+                    overflow: "hidden",
+                    minHeight: 390,
                   }}
                 >
-                  <Tab label="Season" />
-                  <Tab label="Mint" />
-                  <Tab label="Authority" />
-                  <Tab label="Metadata" />
-                  <Tab label="Decay" />
-                  <Tab label="Reputation Ops" />
-                  <Tab label="Danger" />
-                </Tabs>
+                  <Box
+                    component="nav"
+                    sx={{
+                      p: 1,
+                      background: "rgba(2,6,23,0.34)",
+                      borderRight: { md: "1px solid rgba(148,163,184,0.16)" },
+                      borderBottom: { xs: "1px solid rgba(148,163,184,0.16)", md: 0 },
+                    }}
+                  >
+                    <Typography variant="overline" sx={{ px: 1.5, opacity: 0.55, letterSpacing: 1.1 }}>
+                      Administration
+                    </Typography>
+                    <Tabs
+                      value={tab}
+                      onChange={(_, v) => setTab(v)}
+                      orientation={desktopAdminNav ? "vertical" : "horizontal"}
+                      variant="scrollable"
+                      scrollButtons="auto"
+                      sx={{
+                        mt: 0.5,
+                        "& .MuiTab-root": {
+                          textTransform: "none",
+                          minHeight: 42,
+                          alignItems: desktopAdminNav ? "flex-start" : "center",
+                          borderRadius: "10px",
+                          px: 1.5,
+                          fontWeight: 600,
+                        },
+                        "& .Mui-selected": { background: "rgba(56,189,248,0.10)" },
+                        "& .MuiTabs-indicator": { backgroundColor: "rgba(56,189,248,0.9)" },
+                      }}
+                    >
+                      <Tab label="Season" />
+                      <Tab label="Reputation mint" />
+                      <Tab label="Authority" />
+                      <Tab label="Metadata" />
+                      <Tab label="Decay" />
+                      <Tab label="Member scores" />
+                      <Tab label="Danger zone" />
+                    </Tabs>
+                  </Box>
+
+                  <Box component="section" sx={{ p: { xs: 1.5, md: 2.5 }, minWidth: 0 }}>
+                    {!isAuthority && (
+                      <Alert severity="warning" sx={{ borderRadius: "12px", mb: 1.5 }}>
+                        Connect the authority wallet to make changes. You can still review settings.
+                      </Alert>
+                    )}
 
                 <TabPanel value={tab} index={0}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 650, mb: 1 }}>
@@ -1859,11 +1898,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       Update season
                     </Button>
 
-                    {!isAuthority && (
-                      <Alert severity="warning" sx={{ borderRadius: "14px" }}>
-                        Admin actions require the authority wallet.
-                      </Alert>
-                    )}
                   </Box>
                 </TabPanel>
 
@@ -1983,11 +2017,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       Update decay
                     </Button>
 
-                    {!isAuthority && (
-                      <Alert severity="warning" sx={{ borderRadius: "14px" }}>
-                        Admin actions require the authority wallet.
-                      </Alert>
-                    )}
                   </Box>
                 </TabPanel>
 
@@ -2313,11 +2342,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       )}
                     </Box>
 
-                    {!isAuthority && (
-                      <Alert severity="warning" sx={{ borderRadius: "14px" }}>
-                        Admin actions require the authority wallet.
-                      </Alert>
-                    )}
                   </Box>
                 </TabPanel>
 
@@ -2466,13 +2490,10 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       </Button>
                     </Box>
 
-                    {!isAuthority && (
-                      <Alert severity="warning" sx={{ borderRadius: "14px" }}>
-                        Admin actions require the authority wallet.
-                      </Alert>
-                    )}
                   </Box>
                 </TabPanel>
+                  </Box>
+                </Box>
               </>
             )}
           </Box>
