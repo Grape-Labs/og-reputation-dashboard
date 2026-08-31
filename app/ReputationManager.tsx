@@ -133,6 +133,16 @@ function extractTxErrorMessage(e: any) {
 }
 
 type BulkRow = { wallet: string; amount: number };
+type BulkMode = "add" | "remove" | "set";
+type BulkPreviewRow = BulkRow & {
+  before: bigint;
+  after: bigint;
+  existed: boolean;
+};
+type BulkUndo = {
+  season: number;
+  rows: Array<Pick<BulkPreviewRow, "wallet" | "before" | "existed">>;
+};
 
 function chunk<T>(arr: T[], size: number) {
   const out: T[][] = [];
@@ -429,8 +439,9 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     // bulk import
   const [bulkText, setBulkText] = useState<string>("");
   const [bulkSeason, setBulkSeason] = useState<number>(0);
-  const [bulkMode, setBulkMode] = useState<"add" | "resetAdd">("add");
-  const [bulkPreview, setBulkPreview] = useState<BulkRow[]>([]);
+  const [bulkMode, setBulkMode] = useState<BulkMode>("add");
+  const [bulkPreview, setBulkPreview] = useState<BulkPreviewRow[]>([]);
+  const [bulkUndo, setBulkUndo] = useState<BulkUndo | null>(null);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
   const [bulkProgress, setBulkProgress] = useState<string>("");
 
@@ -897,6 +908,10 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
         // Best effort: some RPCs lag or prune quickly; refresh retries below still run.
       }
 
+      // The transaction is complete from the user's perspective. Do not keep the
+      // dialog locked while the slower RPC/indexer refreshes run below.
+      setSubmitting(false);
+
       // refresh
       if (daoPk) {
         const c = await fetchConfig(connection, daoPk);
@@ -973,13 +988,66 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     });
   };
 
-    const handleBulkPreview = () => {
-    const { rows, errors } = parseBulkInput(bulkText);
-    setBulkPreview(rows);
-    setBulkErrors(errors);
-    setBulkProgress("");
-    if (!rows.length && !errors.length) {
-      setBulkErrors(["No rows found. Paste lines like: wallet,amount"]);
+  const loadBulkPreview = async (
+    rows: BulkRow[],
+    season: number,
+    mode: BulkMode
+  ): Promise<BulkPreviewRow[]> => {
+    if (!daoPk) throw new Error("Invalid DAO id.");
+
+    return Promise.all(
+      rows.map(async (row) => {
+        const reputation = await fetchReputation(
+          connection,
+          daoPk,
+          new PublicKey(row.wallet),
+          season
+        );
+        const before =
+          reputation?.points == null ? BigInt(0) : BigInt(reputation.points as any);
+        const amount = BigInt(row.amount);
+        const after =
+          mode === "add"
+            ? before + amount
+            : mode === "remove"
+              ? before > amount
+                ? before - amount
+                : BigInt(0)
+              : amount;
+
+        return { ...row, before, after, existed: !!reputation };
+      })
+    );
+  };
+
+  const handleBulkPreview = async () => {
+    try {
+      if (!cfg) throw new Error("Config not found");
+      const { rows, errors } = parseBulkInput(bulkText);
+      setBulkErrors(errors);
+      setBulkProgress("");
+      if (errors.length) {
+        setBulkPreview([]);
+        return;
+      }
+      if (!rows.length) {
+        setBulkPreview([]);
+        setBulkErrors(["No rows found. Paste lines like: wallet,amount"]);
+        return;
+      }
+
+      setSubmitting(true);
+      setBulkProgress("Loading current scores…");
+      const season = toU16(bulkSeason || cfg.currentSeason);
+      const preview = await loadBulkPreview(rows, season, bulkMode);
+      setBulkPreview(preview);
+      setBulkProgress("");
+    } catch (e: any) {
+      setBulkPreview([]);
+      setBulkProgress("");
+      setBulkErrors([extractTxErrorMessage(e)]);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -1001,7 +1069,6 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     }
 
     const { rows, errors } = parseBulkInput(bulkText);
-    setBulkPreview(rows);
     setBulkErrors(errors);
 
     if (errors.length) throw new Error(`Fix ${errors.length} parse errors first.`);
@@ -1016,7 +1083,13 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     const usableRows = rows.filter((r) => Number(r.amount) > 0);
     if (!usableRows.length) throw new Error("No rows with amount > 0 to import.");
 
-    const batches = chunk(usableRows, 5); // conservative default
+    // Always refresh the preview immediately before signing so both the UI and
+    // the transaction use the same current on-chain values.
+    const changes = await loadBulkPreview(usableRows, season, bulkMode);
+    setBulkPreview(changes);
+    const batches = chunk(changes, 5); // conservative default
+    const completedUndo: BulkUndo["rows"] = [];
+    setBulkUndo(null);
 
     for (let bi = 0; bi < batches.length; bi++) {
       const batch = batches[bi];
@@ -1024,26 +1097,13 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       const ixs: TransactionInstruction[] = [];
 
       for (const r of batch) {
-        const amtNum = Number(r.amount);
-        if (!Number.isFinite(amtNum) || amtNum <= 0) continue; // double safety
-
         const user = new PublicKey(r.wallet);
-        const amt = BigInt(Math.floor(amtNum));
-
-        // Build add ix so we get repPda/configPda (same as working per-wallet)
-        const builtAdd = await buildAddReputationIx({
-          conn: connection,
-          daoId: daoPk,
-          authority: publicKey,
-          payer: publicKey,
-          user,
-          amount: amt,
-          season, // must be number
-        });
+        const [configPda] = getConfigPda(daoPk);
+        const [repPda] = getReputationPda(configPda, user, season);
 
         // ---- Optional self-heal (ADMIN only), identical logic to handleAddRep
         let didAdminClose = false;
-        const repInfo = await connection.getAccountInfo(builtAdd.repPda, "confirmed");
+        const repInfo = await connection.getAccountInfo(repPda, "confirmed");
         const repLooksProgramOwned = !!repInfo && repInfo.owner.equals(VINE_REP_PROGRAM_ID);
 
         if (repLooksProgramOwned && publicKey.equals(ADMIN)) {
@@ -1051,15 +1111,16 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
           ixs.push(
             await buildAdminCloseAnyIx({
               authority: publicKey,
-              target: builtAdd.repPda,
+              target: repPda,
               recipient: publicKey,
             })
           );
           didAdminClose = true;
         }
 
-        // If mode is resetAdd, only include reset if we DID NOT close (reset needs account to exist)
-        if (bulkMode === "resetAdd" && !didAdminClose) {
+        // Reset only an account that actually exists. New wallets can go straight
+        // to the direct write below.
+        if (bulkMode === "set" && repLooksProgramOwned && !didAdminClose) {
           const resetIx = await ixResetReputation({
             daoId: daoPk,
             authority: publicKey,
@@ -1069,8 +1130,18 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
           ixs.push(resetIx);
         }
 
-        // Finally add reputation
-        ixs.push(builtAdd.ix);
+        // The deployed instruction accepts the resulting total, so write the
+        // exact value shown in the preview for add, remove, and set operations.
+        ixs.push(
+          await ixAddReputation({
+            daoId: daoPk,
+            authority: publicKey,
+            payer: publicKey,
+            user,
+            amount: r.after,
+            currentSeason: season,
+          })
+        );
       }
 
       if (!ixs.length) continue;
@@ -1085,7 +1156,16 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       }
 
       setSnackMsg(`✅ Bulk tx ${bi + 1}/${batches.length}. Tx: ${sig}`);
+      completedUndo.push(
+        ...batch.map(({ wallet, before, existed }) => ({ wallet, before, existed }))
+      );
+      // Save after every confirmed chunk so even a later chunk failure can be reverted.
+      setBulkUndo({ season, rows: [...completedUndo] });
     }
+
+    // All wallet transactions have completed. Keep the remaining propagation
+    // refreshes non-blocking so the manager can be closed immediately.
+    setSubmitting(false);
 
     setBulkProgress("Waiting for RPC propagation…");
 
@@ -1113,6 +1193,64 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     setSubmitting(false);
   }
 };
+
+  const handleBulkRevert = async () => {
+    if (!bulkUndo?.rows.length) return;
+
+    try {
+      if (!connected || !publicKey) throw new Error("Connect a wallet first.");
+      if (!daoPk) throw new Error("Invalid DAO id.");
+      if (!isAuthority) throw new Error("Only authority can revert changes");
+
+      setSubmitting(true);
+      setSnackMsg("");
+      setSnackError("");
+      const batches = chunk(bulkUndo.rows, 5);
+
+      for (let bi = 0; bi < batches.length; bi++) {
+        const ixs: TransactionInstruction[] = [];
+        for (const row of batches[bi]) {
+          const user = new PublicKey(row.wallet);
+          if (row.existed) {
+            ixs.push(
+              await ixAddReputation({
+                daoId: daoPk,
+                authority: publicKey,
+                payer: publicKey,
+                user,
+                amount: row.before,
+                currentSeason: bulkUndo.season,
+              })
+            );
+          } else {
+            const { ix } = await buildCloseReputationIx({
+              daoId: daoPk,
+              user,
+              season: bulkUndo.season,
+              authority: publicKey,
+              recipient: publicKey,
+            });
+            ixs.push(ix);
+          }
+        }
+
+        setBulkProgress(`Reverting ${bi + 1}/${batches.length}…`);
+        const sig = await sendTransaction(new Transaction().add(...ixs), connection);
+        await connection.confirmTransaction(sig, "confirmed").catch(() => undefined);
+      }
+
+      setBulkUndo(null);
+      setSubmitting(false);
+      setBulkProgress("Reverted ✅");
+      setSnackMsg("✅ Restored the scores from before the last bulk operation.");
+      await notifyChanged([1500, 3000]);
+      await handleBulkPreview();
+    } catch (e: any) {
+      setSnackError(extractTxErrorMessage(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleSetSeason = async () => {
     await runTx("Updated season", async () => {
@@ -1976,11 +2114,15 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                             labelId="bulk-mode-label"
                             label="Mode"
                             value={bulkMode}
-                            onChange={(e) => setBulkMode(e.target.value as any)}
+                            onChange={(e) => {
+                              setBulkMode(e.target.value as BulkMode);
+                              setBulkPreview([]);
+                            }}
                             sx={glassFieldSx as any}
                           >
                             <MenuItem value="add">Add points</MenuItem>
-                            <MenuItem value="resetAdd">Reset then add</MenuItem>
+                            <MenuItem value="remove">Remove points</MenuItem>
+                            <MenuItem value="set">Set exact score</MenuItem>
                           </Select>
                         </FormControl>
                       </Box>
@@ -1988,7 +2130,10 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       <TextField
                         label='Paste lines: "wallet,amount"'
                         value={bulkText}
-                        onChange={(e) => setBulkText(e.target.value)}
+                        onChange={(e) => {
+                          setBulkText(e.target.value);
+                          setBulkPreview([]);
+                        }}
                         disabled={submitting}
                         multiline
                         minRows={6}
@@ -2017,7 +2162,20 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                           variant="contained"
                           sx={glassPrimaryBtnSx}
                         >
-                          Import (chunked)
+                          Apply changes
+                        </Button>
+
+                        <Button
+                          onClick={handleBulkRevert}
+                          disabled={!isAuthority || submitting || !bulkUndo?.rows.length}
+                          variant="outlined"
+                          color="warning"
+                          sx={{
+                            ...glassSecondaryBtnSx,
+                            border: "1px solid rgba(245,158,11,0.55)",
+                          }}
+                        >
+                          Revert last changes
                         </Button>
 
                         {bulkProgress && (
@@ -2043,14 +2201,63 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       )}
 
                       {!!bulkPreview.length && !bulkErrors.length && (
-                        <Alert severity="success" sx={{ borderRadius: "14px" }}>
-                          Ready: {bulkPreview.length} wallets parsed.
-                          {bulkPreview.length <= 5
-                            ? ` (${bulkPreview
-                                .map((r) => `${shorten(r.wallet)}=${r.amount}`)
-                                .join(", ")})`
-                            : ""}
-                        </Alert>
+                        <Box
+                          sx={{
+                            borderRadius: "14px",
+                            border: "1px solid rgba(34,197,94,0.30)",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(130px, 1fr) repeat(3, minmax(72px, auto))",
+                              gap: 1,
+                              px: 1.5,
+                              py: 1,
+                              background: "rgba(34,197,94,0.10)",
+                              fontWeight: 700,
+                            }}
+                          >
+                            <Typography variant="caption">Wallet</Typography>
+                            <Typography variant="caption" align="right">Before</Typography>
+                            <Typography variant="caption" align="right">Change</Typography>
+                            <Typography variant="caption" align="right">After</Typography>
+                          </Box>
+                          <Box sx={{ maxHeight: 280, overflowY: "auto" }}>
+                            {bulkPreview.map((row) => (
+                              <Box
+                                key={row.wallet}
+                                sx={{
+                                  display: "grid",
+                                  gridTemplateColumns: "minmax(130px, 1fr) repeat(3, minmax(72px, auto))",
+                                  gap: 1,
+                                  px: 1.5,
+                                  py: 0.9,
+                                  borderTop: "1px solid rgba(148,163,184,0.14)",
+                                }}
+                              >
+                                <Typography variant="body2" title={row.wallet}>
+                                  {shorten(row.wallet, 7, 7)}
+                                </Typography>
+                                <Typography variant="body2" align="right">
+                                  {row.before.toString()}
+                                </Typography>
+                                <Typography
+                                  variant="body2"
+                                  align="right"
+                                  sx={{ color: bulkMode === "remove" ? "#fca5a5" : "#86efac" }}
+                                >
+                                  {bulkMode === "remove" ? "−" : bulkMode === "add" ? "+" : "→"}
+                                  {row.amount}
+                                </Typography>
+                                <Typography variant="body2" align="right" sx={{ fontWeight: 700 }}>
+                                  {row.after.toString()}
+                                </Typography>
+                              </Box>
+                            ))}
+                          </Box>
+                        </Box>
                       )}
                     </Box>
 
