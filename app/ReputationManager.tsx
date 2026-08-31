@@ -140,6 +140,7 @@ type BulkPreviewRow = BulkRow & {
   existed: boolean;
 };
 type BulkUndo = {
+  daoId: string;
   season: number;
   rows: Array<Pick<BulkPreviewRow, "wallet" | "before" | "existed">>;
 };
@@ -410,6 +411,9 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   // rep ops
   const [repUser, setRepUser] = useState<string>("");
   const [repAmount, setRepAmount] = useState<number>(0);
+  const [repCurrent, setRepCurrent] = useState<bigint | null>(null);
+  const [repCurrentLoading, setRepCurrentLoading] = useState(false);
+  const [repCurrentError, setRepCurrentError] = useState("");
   const [repOldWallet, setRepOldWallet] = useState<string>("");
   const [repNewWallet, setRepNewWallet] = useState<string>("");
 
@@ -511,6 +515,8 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
     setRepUser("");
     setRepAmount(0);
+    setRepCurrent(null);
+    setRepCurrentError("");
     setRepOldWallet("");
     setRepNewWallet("");
 
@@ -585,6 +591,55 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       }
     })();
   }, [open, connection, daoPk]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const wallet = repUser.trim();
+
+    if (!open || !daoPk || !cfg || !wallet) {
+      setRepCurrent(null);
+      setRepCurrentError("");
+      setRepCurrentLoading(false);
+      return;
+    }
+
+    let user: PublicKey;
+    try {
+      user = new PublicKey(wallet);
+    } catch {
+      setRepCurrent(null);
+      setRepCurrentError("Enter a valid wallet to load its current score.");
+      setRepCurrentLoading(false);
+      return;
+    }
+
+    setRepCurrentLoading(true);
+    setRepCurrentError("");
+    const timer = setTimeout(() => {
+      fetchReputation(connection, daoPk, user, toU16(cfg.currentSeason))
+        .then((reputation) => {
+          if (!cancelled) {
+            setRepCurrent(
+              reputation?.points == null ? BigInt(0) : BigInt(reputation.points as any)
+            );
+          }
+        })
+        .catch((e: any) => {
+          if (!cancelled) {
+            setRepCurrent(null);
+            setRepCurrentError(e?.message ?? "Failed to load current score");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setRepCurrentLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, connection, daoPk, cfg, repUser]);
 
   /** ------------------------------
    *  Instruction builders
@@ -887,7 +942,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   const runTx = async (
     label: string,
     buildIxs: () => Promise<TransactionInstruction[]>,
-    opts?: { refreshDelaysMs?: number[] }
+    opts?: { refreshDelaysMs?: number[]; onConfirmed?: () => void }
   ) => {
     try {
       setSubmitting(true);
@@ -911,6 +966,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       // The transaction is complete from the user's perspective. Do not keep the
       // dialog locked while the slower RPC/indexer refreshes run below.
       setSubmitting(false);
+      opts?.onConfirmed?.();
 
       // refresh
       if (daoPk) {
@@ -1089,38 +1145,23 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     setBulkPreview(changes);
     const batches = chunk(changes, 5); // conservative default
     const completedUndo: BulkUndo["rows"] = [];
-    setBulkUndo(null);
 
     for (let bi = 0; bi < batches.length; bi++) {
       const batch = batches[bi];
+      const effectiveBatch = batch.filter((row) => row.after !== row.before);
 
       const ixs: TransactionInstruction[] = [];
 
-      for (const r of batch) {
+      for (const r of effectiveBatch) {
         const user = new PublicKey(r.wallet);
         const [configPda] = getConfigPda(daoPk);
         const [repPda] = getReputationPda(configPda, user, season);
-
-        // ---- Optional self-heal (ADMIN only), identical logic to handleAddRep
-        let didAdminClose = false;
         const repInfo = await connection.getAccountInfo(repPda, "confirmed");
         const repLooksProgramOwned = !!repInfo && repInfo.owner.equals(VINE_REP_PROGRAM_ID);
 
-        if (repLooksProgramOwned && publicKey.equals(ADMIN)) {
-          // (best effort) always close if program-owned exists — same as your working code
-          ixs.push(
-            await buildAdminCloseAnyIx({
-              authority: publicKey,
-              target: repPda,
-              recipient: publicKey,
-            })
-          );
-          didAdminClose = true;
-        }
-
-        // Reset only an account that actually exists. New wallets can go straight
-        // to the direct write below.
-        if (bulkMode === "set" && repLooksProgramOwned && !didAdminClose) {
+        // Add is a delta. Remove and set are replacements, so clear an existing
+        // balance before adding the exact target shown in the preview.
+        if (bulkMode !== "add" && repLooksProgramOwned) {
           const resetIx = await ixResetReputation({
             daoId: daoPk,
             authority: publicKey,
@@ -1130,18 +1171,19 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
           ixs.push(resetIx);
         }
 
-        // The deployed instruction accepts the resulting total, so write the
-        // exact value shown in the preview for add, remove, and set operations.
-        ixs.push(
-          await ixAddReputation({
-            daoId: daoPk,
-            authority: publicKey,
-            payer: publicKey,
-            user,
-            amount: r.after,
-            currentSeason: season,
-          })
-        );
+        const amountToAdd = bulkMode === "add" ? BigInt(r.amount) : r.after;
+        if (amountToAdd > BigInt(0)) {
+          ixs.push(
+            await ixAddReputation({
+              daoId: daoPk,
+              authority: publicKey,
+              payer: publicKey,
+              user,
+              amount: amountToAdd,
+              currentSeason: season,
+            })
+          );
+        }
       }
 
       if (!ixs.length) continue;
@@ -1157,10 +1199,10 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
       setSnackMsg(`✅ Bulk tx ${bi + 1}/${batches.length}. Tx: ${sig}`);
       completedUndo.push(
-        ...batch.map(({ wallet, before, existed }) => ({ wallet, before, existed }))
+        ...effectiveBatch.map(({ wallet, before, existed }) => ({ wallet, before, existed }))
       );
       // Save after every confirmed chunk so even a later chunk failure can be reverted.
-      setBulkUndo({ season, rows: [...completedUndo] });
+      setBulkUndo({ daoId: daoPk.toBase58(), season, rows: [...completedUndo] });
     }
 
     // All wallet transactions have completed. Keep the remaining propagation
@@ -1201,11 +1243,15 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       if (!connected || !publicKey) throw new Error("Connect a wallet first.");
       if (!daoPk) throw new Error("Invalid DAO id.");
       if (!isAuthority) throw new Error("Only authority can revert changes");
+      if (bulkUndo.daoId !== daoPk.toBase58()) {
+        throw new Error("The saved changes belong to a different reputation space");
+      }
 
       setSubmitting(true);
       setSnackMsg("");
       setSnackError("");
       const batches = chunk(bulkUndo.rows, 5);
+      let revertedCount = 0;
 
       for (let bi = 0; bi < batches.length; bi++) {
         const ixs: TransactionInstruction[] = [];
@@ -1213,15 +1259,25 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
           const user = new PublicKey(row.wallet);
           if (row.existed) {
             ixs.push(
-              await ixAddReputation({
+              await ixResetReputation({
                 daoId: daoPk,
                 authority: publicKey,
-                payer: publicKey,
                 user,
-                amount: row.before,
                 currentSeason: bulkUndo.season,
               })
             );
+            if (row.before > BigInt(0)) {
+              ixs.push(
+                await ixAddReputation({
+                  daoId: daoPk,
+                  authority: publicKey,
+                  payer: publicKey,
+                  user,
+                  amount: row.before,
+                  currentSeason: bulkUndo.season,
+                })
+              );
+            }
           } else {
             const { ix } = await buildCloseReputationIx({
               daoId: daoPk,
@@ -1237,6 +1293,12 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
         setBulkProgress(`Reverting ${bi + 1}/${batches.length}…`);
         const sig = await sendTransaction(new Transaction().add(...ixs), connection);
         await connection.confirmTransaction(sig, "confirmed").catch(() => undefined);
+        revertedCount += batches[bi].length;
+        setBulkUndo({
+          daoId: bulkUndo.daoId,
+          season: bulkUndo.season,
+          rows: bulkUndo.rows.slice(revertedCount),
+        });
       }
 
       setBulkUndo(null);
@@ -1244,7 +1306,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       setBulkProgress("Reverted ✅");
       setSnackMsg("✅ Restored the scores from before the last bulk operation.");
       await notifyChanged([1500, 3000]);
-      await handleBulkPreview();
+      if (bulkText.trim()) await handleBulkPreview();
     } catch (e: any) {
       setSnackError(extractTxErrorMessage(e));
     } finally {
@@ -1337,68 +1399,32 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   }
 
   const handleAddRep = async () => {
+    const amount = BigInt(Math.max(0, Math.floor(Number(repAmount || 0))));
     await runTx("Added reputation", async () => {
       if (!publicKey || !daoPk) throw new Error("Missing wallet/DAO");
       if (!cfg) throw new Error("Config not found");
       if (!isAuthority) throw new Error("Only authority can add reputation");
+      if (amount <= BigInt(0)) throw new Error("Amount must be greater than 0");
 
       const user = new PublicKey(repUser.trim());
-      const amt = BigInt(Math.max(0, Math.floor(Number(repAmount || 0))));
       const season = toU16(cfg.currentSeason);
 
-      // Build the add ix (also returns repPda/configPda)
-      const built = await buildAddReputationIx({
-        conn: connection,
-        daoId: daoPk,
-        authority: publicKey,
-        payer: publicKey,
-        user,
-        amount: amt,
-        // You can omit season; if you keep it, make sure it's a number:
-        season,
-      });
-
-      const ixs: TransactionInstruction[] = [];
-
-      // ---- Optional self-heal (only if wallet == ADMIN)
-      const repInfo = await connection.getAccountInfo(built.repPda, "confirmed");
-      const repLooksProgramOwned = !!repInfo && repInfo.owner.equals(VINE_REP_PROGRAM_ID);
-
-      // If a legacy/bad account exists, addReputation may fail with SeasonMismatch.
-      // If we are ADMIN, close it first.
-      if (repLooksProgramOwned && publicKey.equals(ADMIN)) {
-        // Best-effort decode; if decode fails, still close (like solpg)
-        let shouldClose = false;
-        try {
-          // If you have a decodeReputation() helper in npm, use it. Otherwise skip decode.
-          // shouldClose = decoded.season !== season;
-          // If you don't decode, you can just close if account exists and program-owned.
-          // But that's more aggressive.
-          shouldClose = true;
-        } catch {
-          shouldClose = true;
-        }
-
-        if (shouldClose) {
-          ixs.push(
-            await buildAdminCloseAnyIx({
-              authority: publicKey,
-              target: built.repPda,
-              recipient: publicKey,
-            })
-          );
-        }
-      } else if (repLooksProgramOwned && !publicKey.equals(ADMIN)) {
-        // Not admin => we cannot repair legacy mismatch from the UI
-        // (Optional) You can let it try and show SeasonMismatch, but this is clearer:
-        // throw new Error("Legacy reputation PDA needs admin cleanup. Please connect ADMIN wallet to repair.");
-      }
-
-      ixs.push(built.ix);
-      return ixs;
+      // The program adds this value to the current balance. Send only the delta;
+      // buildAddReputationIx pre-adds the balance and would double-count it.
+      return [
+        await ixAddReputation({
+          daoId: daoPk,
+          authority: publicKey,
+          payer: publicKey,
+          user,
+          amount,
+          currentSeason: season,
+        }),
+      ];
     }, {
       // RPC indexers can lag after chain confirmation; refresh a few times.
       refreshDelaysMs: [1500, 3000, 6000],
+      onConfirmed: () => setRepCurrent((current) => (current ?? BigInt(0)) + amount),
     });
   };
 
@@ -1420,32 +1446,9 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
         user,
         currentSeason: season,
       });
-      const [configPda] = getConfigPda(daoPk);
-      const [repPda] = getReputationPda(configPda, user, season);
-
-      const ixs: TransactionInstruction[] = [];
-
-      // Same repair option (ADMIN only)
-      const repInfo = await connection.getAccountInfo(repPda, "confirmed");
-      const repLooksProgramOwned = !!repInfo && repInfo.owner.equals(VINE_REP_PROGRAM_ID);
-
-      if (repLooksProgramOwned && publicKey.equals(ADMIN)) {
-        ixs.push(
-          await buildAdminCloseAnyIx({
-            authority: publicKey,
-            target: repPda,
-            recipient: publicKey,
-          })
-        );
-        // After closing, reset ix isn't needed anymore (rep is gone),
-        // but keeping it is harmless if reset expects account to exist.
-        // In your program reset expects rep PDA exists, so:
-        // better to NOT reset after close; instead just exit or re-init rep via addReputation.
-        // So for reset flow, only push resetIx (no close) unless you're sure.
-      }
-
-      ixs.push(resetIx);
-      return ixs;
+      return [resetIx];
+    }, {
+      onConfirmed: () => setRepCurrent(BigInt(0)),
     });
   };
 
@@ -2001,6 +2004,12 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                         onChange={(e) => setRepUser(e.target.value)}
                         disabled={submitting}
                         InputProps={{ sx: glassFieldSx }}
+                        helperText={
+                          repCurrentLoading
+                            ? "Loading current score…"
+                            : repCurrentError || "Current-season balance is loaded automatically."
+                        }
+                        error={!!repCurrentError && !!repUser.trim()}
                       />
 
                       <Box
@@ -2042,6 +2051,45 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                           </Button>
                         </Box>
                       </Box>
+
+                      {repCurrent !== null && !repCurrentError && (
+                        <Box
+                          sx={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(3, 1fr)",
+                            gap: 1,
+                            p: 1.3,
+                            borderRadius: "14px",
+                            border: "1px solid rgba(34,197,94,0.30)",
+                            background: "rgba(34,197,94,0.08)",
+                          }}
+                        >
+                          <Box>
+                            <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                              Before
+                            </Typography>
+                            <Typography sx={{ fontWeight: 700 }}>
+                              {repCurrent.toString()}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ textAlign: "center" }}>
+                            <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                              Add
+                            </Typography>
+                            <Typography sx={{ fontWeight: 700, color: "#86efac" }}>
+                              +{Math.max(0, Math.floor(repAmount || 0))}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ textAlign: "right" }}>
+                            <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                              After
+                            </Typography>
+                            <Typography sx={{ fontWeight: 700 }}>
+                              {(repCurrent + BigInt(Math.max(0, Math.floor(repAmount || 0)))).toString()}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      )}
                     </Box>
 
                     <Divider sx={{ borderColor: "rgba(148,163,184,0.20)" }} />
@@ -2087,7 +2135,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
                     <Box sx={{ display: "grid", gap: 1.2, maxWidth: 860 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 650 }}>
-                        Bulk import (CSV / plaintext)
+                        Bulk reputation changes (CSV / plaintext)
                       </Typography>
 
                       <Box
@@ -2101,7 +2149,10 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                           label="Season"
                           type="number"
                           value={bulkSeason || cfg.currentSeason}
-                          onChange={(e) => setBulkSeason(Number(e.target.value) || 0)}
+                          onChange={(e) => {
+                            setBulkSeason(Number(e.target.value) || 0);
+                            setBulkPreview([]);
+                          }}
                           disabled={submitting}
                           InputProps={{ sx: glassFieldSx }}
                           helperText={`Default: current season (${cfg.currentSeason})`}
@@ -2176,6 +2227,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                           }}
                         >
                           Revert last changes
+                          {bulkUndo?.rows.length ? ` (${bulkUndo.rows.length})` : ""}
                         </Button>
 
                         {bulkProgress && (
