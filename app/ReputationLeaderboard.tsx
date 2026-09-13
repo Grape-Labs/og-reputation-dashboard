@@ -1745,7 +1745,7 @@ const handleGetRaffleSelection = () => {
                 helperText={
                   rewardPresets.length > 0
                     ? `${rewardPresets.length} draw slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} winners assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
-                    : "Optional. Browser-only format: TOKEN:AMOUNT,TOKEN:AMOUNT or WILDCARD:1"
+                    : "Optional. Browser-only format: SYMBOL:AMOUNT or MINT_ADDRESS:AMOUNT, separated by commas; WILDCARD:1 skips a winner."
                 }
                 sx={{
                   "& .MuiOutlinedInput-root": {
