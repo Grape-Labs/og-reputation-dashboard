@@ -1348,7 +1348,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   };
 
   const handleSetMint = async () => {
-    await runTx("Updated mint", async () => {
+    await runTx("Updated space mint", async () => {
       if (!publicKey || !daoPk) throw new Error("Missing wallet/DAO");
       if (!cfg) throw new Error("Config not found");
       if (!isAuthority) throw new Error("Only authority can update mint");
@@ -1736,7 +1736,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                   }}
                 >
                   <Typography variant="caption" sx={{ opacity: 0.75 }}>
-                    Reputation mint
+                    Space mint
                   </Typography>
                   <Typography
                     variant="body2"
@@ -1790,7 +1790,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
                 <Box sx={{ mt: 1.5, display: "grid", gap: 1.3 }}>
                   <TextField
-                    label="Reputation mint"
+                    label="Space mint"
                     fullWidth
                     value={repMint}
                     onChange={(e) => setRepMint(e.target.value)}
@@ -1878,7 +1878,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       }}
                     >
                       <Tab label="Season" />
-                      <Tab label="Reputation mint" />
+                      <Tab label="Space mint" />
                       <Tab label="Authority" />
                       <Tab label="Metadata" />
                       <Tab label="Decay" />
@@ -1929,16 +1929,16 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
                 <TabPanel value={tab} index={1}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 650, mb: 1 }}>
-                    Set reputation mint
+                    Set space mint
                   </Typography>
                   <Box sx={{ display: "grid", gap: 1.2, maxWidth: 680 }}>
                     <TextField
-                      label="New mint"
+                      label="New space mint"
                       value={newMint}
                       onChange={(e) => setNewMint(e.target.value)}
                       disabled={submitting}
                       InputProps={{ sx: glassFieldSx }}
-                      helperText={`Current: ${cfg.repMint.toBase58()}`}
+                      helperText={`Required by the on-chain program; balances do not affect points. Current: ${cfg.repMint.toBase58()}`}
                       FormHelperTextProps={{ sx: { opacity: 0.7 } }}
                     />
                     <Button

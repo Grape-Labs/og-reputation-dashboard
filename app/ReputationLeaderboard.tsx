@@ -11,11 +11,7 @@ import html2canvas from "html2canvas";
 //import confetti from "canvas-confetti";
 import bs58 from "bs58";
 
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
-
 import {
-  FormControlLabel, 
-  Switch,
   Paper,
   Grid,
   Box,
@@ -337,29 +333,6 @@ const ReputationLeaderboard: FC<ReputationLeaderboardProps> = (props) => {
 
   let top10SharePct = 0;
   let medianBalance = 0;
-
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  const mode = searchParams.get("mode");
-  const isLegacy = searchParams.get("legacy") === "1" || mode === "token";
-
-  const toggleLegacy = (checked: boolean) => {
-    const params = new URLSearchParams(searchParams.toString());
-
-    if (checked) {
-      params.set("legacy", "1");
-      params.set("mode", "token");
-    } else {
-      params.delete("legacy");
-      if (params.get("mode") === "token") params.delete("mode");
-    }
-
-    // keep everything else the same (dao, season, etc.)
-    const qs = params.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname);
-  };
 
   function weightedPickByBigInt(
     entries: Array<{ address: string; weight: bigint }>,
@@ -1451,31 +1424,6 @@ const handleGetRaffleSelection = () => {
 
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           
-          <Box
-            sx={{
-              ml: 0.75,
-              px: 1,
-              py: 0.35,
-              borderRadius: "12px",
-              border: "1px solid rgba(148,163,184,0.5)",
-              background: "rgba(15,23,42,0.9)",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <FormControlLabel
-              sx={{ m: 0 }}
-              label={<span style={{ fontSize: 12, opacity: 0.85 }}>{isLegacy ? "Token" : "Reputation"}</span>}
-              control={
-                <Switch
-                  size="small"
-                  checked={isLegacy}
-                  onChange={(e) => toggleLegacy(e.target.checked)}
-                />
-              }
-            />
-          </Box>
-          
           {holders.length > 0 && (
             <>
               <Tooltip title="Copy holders as CSV" arrow>
@@ -1797,7 +1745,7 @@ const handleGetRaffleSelection = () => {
                 helperText={
                   rewardPresets.length > 0
                     ? `${rewardPresets.length} draw slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} winners assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
-                    : "Optional. Browser-only format: TOKEN:AMOUNT,TOKEN:AMOUNT or WILDCARD:1"
+                    : "Optional. Browser-only format: SYMBOL:AMOUNT or MINT_ADDRESS:AMOUNT, separated by commas; WILDCARD:1 skips a winner."
                 }
                 sx={{
                   "& .MuiOutlinedInput-root": {

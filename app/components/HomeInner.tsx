@@ -50,7 +50,6 @@ import SettingsSuggestIcon from "@mui/icons-material/SettingsSuggest";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
-import TollOutlinedIcon from "@mui/icons-material/TollOutlined";
 import ImageOutlinedIcon from "@mui/icons-material/ImageOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -58,7 +57,6 @@ import HomeRoundedIcon from "@mui/icons-material/HomeRounded";
 
 import CreateReputationSpace from "../CreateReputationSpace";
 import ReputationManager from "../ReputationManager";
-import TokenManager from "../TokenManager";
 import MetadataManager from "../MetadataManager";
 
 
@@ -269,7 +267,6 @@ const glassPillSx = {
 function HeaderActions(props: {
   onCreateSpace: () => void;
   onManageSpace: () => void;
-  onOpenTokenManager: () => void;
   onOpenMetadataManager: () => void;
   onOpenRpcSettings: () => void;
   manageDisabled?: boolean;
@@ -362,19 +359,7 @@ function HeaderActions(props: {
           Manage reputation space
         </MenuItem>
 
-          <Divider />
-
-        <MenuItem
-          onClick={() => {
-            setAnchorEl(null);
-            props.onOpenTokenManager();
-          }}
-        >
-          <ListItemIcon sx={{ color: "inherit", minWidth: 36 }}>
-            <TollOutlinedIcon fontSize="small" />
-          </ListItemIcon>
-          Token manager
-        </MenuItem>
+        <Divider />
 
         <MenuItem
           onClick={() => {
@@ -422,7 +407,6 @@ const HomeInner: React.FC<{ initialState?: HomeInnerInitialState }> = ({ initial
 
   const [createOpen, setCreateOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
-  const [tokenOpen, setTokenOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [leaderboardRefreshNonce, setLeaderboardRefreshNonce] = useState(0);
 
@@ -1027,7 +1011,6 @@ const HomeInner: React.FC<{ initialState?: HomeInnerInitialState }> = ({ initial
             <HeaderActions
               onCreateSpace={() => setCreateOpen(true)}
               onManageSpace={() => setManageOpen(true)}
-              onOpenTokenManager={() => setTokenOpen(true)}
               onOpenMetadataManager={() => setMetadataOpen(true)}
               onOpenRpcSettings={() => setRpcOpen(true)} 
               manageDisabled={manageDisabled}
@@ -1035,7 +1018,6 @@ const HomeInner: React.FC<{ initialState?: HomeInnerInitialState }> = ({ initial
           </Toolbar>
         </AppBar>
 
-        <TokenManager open={tokenOpen} onClose={() => setTokenOpen(false)} />
         <MetadataManager open={metadataOpen} onClose={() => setMetadataOpen(false)} />
         <RpcSettingsDialog open={rpcOpen} onClose={() => setRpcOpen(false)} />
 

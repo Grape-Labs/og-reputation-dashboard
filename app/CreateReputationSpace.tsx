@@ -897,7 +897,7 @@ export default function CreateReputationSpace({
             </Box>
 
             <TextField
-              label="Reputation mint"
+              label="Space mint"
               fullWidth
               value={repMint}
               onChange={(e) => setRepMint(e.target.value)}
@@ -933,7 +933,7 @@ export default function CreateReputationSpace({
                   </InputAdornment>
                 ),
               }}
-              helperText="A Reputation mint is required because it is the on-chain token your space uses to issue and track reputation points. It also serves as a proof and symbol of reputation, even if the mint is not distributed. Paste an existing mint, or click the magic button to create one."
+              helperText="Required by the on-chain program to identify and configure this space. Token balances do not represent reputation or affect points. Paste an existing mint, or use the magic button to create one."
               FormHelperTextProps={{ sx: { opacity: 0.7 } }}
             />
 

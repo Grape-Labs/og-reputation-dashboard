@@ -4,6 +4,8 @@ export type RewardPreset = {
 };
 
 const WILDCARD_TOKEN = "WILDCARD";
+// Solana addresses are case-sensitive base58 identifiers, unlike ticker symbols.
+const SOLANA_ADDRESS_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export type RewardSettings = {
   presetText: string;
@@ -22,7 +24,10 @@ export function parseRewardPresetText(input: string): RewardPreset[] {
     .filter(Boolean)
     .flatMap((entry) => {
       const [tokenRaw, ...amountParts] = entry.split(":");
-      const token = String(tokenRaw || "").trim().toUpperCase();
+      const identifier = String(tokenRaw || "").trim();
+      const token = SOLANA_ADDRESS_PATTERN.test(identifier)
+        ? identifier
+        : identifier.toUpperCase();
       const amount = amountParts.join(":").trim();
 
       if (!token || !amount) return [];
