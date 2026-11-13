@@ -21,6 +21,8 @@ import {
   FormControl,
   InputLabel,
   useMediaQuery,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import {
@@ -38,6 +40,13 @@ import {
   getReputationPda,
   fetchConfig,
   fetchReputation,
+  fetchDelegate,
+  decodeDelegate,
+  getDelegatePda,
+  buildAddDelegateIx,
+  buildUpdateDelegateIx,
+  buildRemoveDelegateIx,
+  type DelegateAccount,
   //fetchProjectMetadata
   buildSetDecayBpsIx,
   buildAdminCloseAnyIx,
@@ -423,6 +432,15 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   const [newMint, setNewMint] = useState<string>("");
   const [newAuthority, setNewAuthority] = useState<string>("");
 
+  const [delegates, setDelegates] = useState<DelegateAccount[]>([]);
+  const [delegateWallet, setDelegateWallet] = useState("");
+  const [delegateAward, setDelegateAward] = useState(true);
+  const [delegateReset, setDelegateReset] = useState(false);
+  const [delegateError, setDelegateError] = useState("");
+  const [delegatesLoading, setDelegatesLoading] = useState(false);
+  const [delegateRevision, setDelegateRevision] = useState(0);
+  const [ownDelegate, setOwnDelegate] = useState<DelegateAccount | null>(null);
+
   // rep ops
   const [repUser, setRepUser] = useState<string>("");
   const [repAmount, setRepAmount] = useState<number>(0);
@@ -497,6 +515,55 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     return publicKey.equals(cfg.authority);
   }, [publicKey, cfg]);
 
+  // Load this wallet independently so score permissions do not depend on GPA support.
+  useEffect(() => {
+    let cancelled = false;
+    setOwnDelegate(null);
+    if (open && configPda && publicKey && cfg && !isAuthority) {
+      fetchDelegate(connection, configPda, publicKey)
+        .then((account) => { if (!cancelled) setOwnDelegate(account); })
+        .catch(() => { /* Fail closed when permission lookup fails. */ });
+    }
+    return () => { cancelled = true; };
+  }, [open, connection, configPda, publicKey, cfg, isAuthority, delegateRevision]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDelegates([]);
+    setDelegateError("");
+    if (!open || !configPda || !cfg) return;
+    setDelegatesLoading(true);
+    (async () => {
+      try {
+        const accounts = await connection.getProgramAccounts(VINE_REP_PROGRAM_ID, {
+          commitment: "confirmed",
+          filters: [{ memcmp: { offset: 9, bytes: configPda.toBase58() } }],
+        });
+        const rows: DelegateAccount[] = [];
+        for (const { pubkey, account } of accounts) {
+          try {
+            const row = await decodeDelegate(account.data);
+            if (row.config.equals(configPda) && getDelegatePda(configPda, row.delegate)[0].equals(pubkey)) rows.push(row);
+          } catch { /* Other account types can share the config filter. */ }
+        }
+        if (!cancelled) setDelegates(rows.sort((a, b) => a.delegate.toBase58().localeCompare(b.delegate.toBase58())));
+      } catch (error: any) {
+        if (!cancelled) setDelegateError(error.message || "Could not load delegates");
+      } finally {
+        if (!cancelled) setDelegatesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, connection, configPda, cfg, delegateRevision]);
+
+  const canAward = isAuthority || !!(ownDelegate && configPda && ownDelegate.config.equals(configPda) && publicKey && ownDelegate.delegate.equals(publicKey) && ownDelegate.canAward);
+  const canReset = isAuthority || !!(ownDelegate && configPda && ownDelegate.config.equals(configPda) && publicKey && ownDelegate.delegate.equals(publicKey) && ownDelegate.canReset);
+  const selectedDelegate = delegates.find((row) => row.delegate.toBase58() === delegateWallet.trim());
+  const validDelegateWallet = useMemo(() => {
+    try { return !new PublicKey(delegateWallet.trim()).equals(PublicKey.default) && delegateWallet.trim() !== cfg?.authority.toBase58(); }
+    catch { return false; }
+  }, [delegateWallet, cfg]);
+
   const spaceExists = !!cfg;
 
   const closeSnack = () => {
@@ -513,6 +580,9 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     if (!open) return;
 
     setTab(0);
+    setDelegateWallet("");
+    setDelegateAward(true);
+    setDelegateReset(false);
     setSubmitting(false);
     setSnackMsg("");
     setSnackError("");
@@ -849,6 +919,9 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
         { pubkey: repPda, isSigner: false, isWritable: true },
         { pubkey: args.payer, isSigner: true, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        ...(!cfg?.authority.equals(args.authority) ? [{
+          pubkey: getDelegatePda(configPda, args.authority)[0], isSigner: false, isWritable: false,
+        }] : []),
       ],
       data: Buffer.from(data),
     });
@@ -874,6 +947,9 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
         { pubkey: args.authority, isSigner: true, isWritable: false },
         { pubkey: repPda, isSigner: false, isWritable: true },
         { pubkey: args.user, isSigner: false, isWritable: false },
+        ...(!cfg?.authority.equals(args.authority) ? [{
+          pubkey: getDelegatePda(configPda, args.authority)[0], isSigner: false, isWritable: false,
+        }] : []),
       ],
       data: Buffer.from(data),
     });
@@ -954,7 +1030,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
   const runTx = async (
     label: string,
     buildIxs: () => Promise<TransactionInstruction[]>,
-    opts?: { refreshDelaysMs?: number[]; onConfirmed?: () => void }
+    opts?: { refreshDelaysMs?: number[]; onConfirmed?: () => void; requireConfirmation?: boolean }
   ) => {
     try {
       setSubmitting(true);
@@ -967,13 +1043,16 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
       const tx = new Transaction().add(...ixs);
 
       const sig = await sendTransaction(tx, connection);
-      setSnackMsg(`✅ ${label}. Tx: ${sig}`);
-
-      try {
+      if (opts?.requireConfirmation) {
+        const confirmation = await connection.confirmTransaction(sig, "confirmed");
+        if (confirmation.value.err) throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      } else try {
         await connection.confirmTransaction(sig, "confirmed");
       } catch {
         // Best effort: some RPCs lag or prune quickly; refresh retries below still run.
       }
+
+      setSnackMsg(`✅ ${label}. Tx: ${sig}`);
 
       // The transaction is complete from the user's perspective. Do not keep the
       // dialog locked while the slower RPC/indexer refreshes run below.
@@ -1360,6 +1439,22 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     });
   };
 
+  const handleDelegate = async (remove: boolean) => {
+    await runTx(remove ? "Revoked delegation" : "Saved delegate permissions", async () => {
+      if (!publicKey || !daoPk || !configPda || !isAuthority) throw new Error("Only authority can manage delegates");
+      if (!validDelegateWallet) throw new Error("Enter a valid delegate wallet");
+      if (!remove && !delegateAward && !delegateReset) throw new Error("Select at least one permission");
+      const wallet = new PublicKey(delegateWallet.trim());
+      // Look up the PDA again so a stale list cannot choose the wrong instruction.
+      const existing = await fetchDelegate(connection, configPda, wallet);
+      const args = { daoId: daoPk, authority: publicKey, delegateWallet: wallet, canAward: delegateAward, canReset: delegateReset };
+      return [remove
+        ? await buildRemoveDelegateIx({ ...args, recipient: publicKey })
+        : existing ? await buildUpdateDelegateIx(args)
+        : await buildAddDelegateIx({ ...args, payer: publicKey })];
+    }, { requireConfirmation: true, onConfirmed: () => setDelegateRevision((n) => n + 1) });
+  };
+
   const handleTransferAuthority = async () => {
     await runTx("Transferred authority", async () => {
       if (!publicKey || !daoPk) throw new Error("Missing wallet/DAO");
@@ -1415,7 +1510,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     await runTx("Added reputation", async () => {
       if (!publicKey || !daoPk) throw new Error("Missing wallet/DAO");
       if (!cfg) throw new Error("Config not found");
-      if (!isAuthority) throw new Error("Only authority can add reputation");
+      if (!canAward) throw new Error("Award permission required");
       if (amount <= BigInt(0)) throw new Error("Amount must be greater than 0");
 
       const user = new PublicKey(repUser.trim());
@@ -1447,7 +1542,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
     await runTx("Reset reputation", async () => {
       if (!publicKey || !daoPk) throw new Error("Missing wallet/DAO");
       if (!cfg) throw new Error("Config not found");
-      if (!isAuthority) throw new Error("Only authority can reset reputation");
+      if (!canReset) throw new Error("Reset permission required");
 
       const user = new PublicKey(repUser.trim());
       const season = toU16(cfg.currentSeason);
@@ -1668,7 +1763,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                 <Chip
                   size="small"
                   label={
-                    isAuthority ? "Admin access" : `Read only · ${authLabel}`
+                    isAuthority ? "Admin access" : canAward || canReset ? "Delegate access" : `Read only · ${authLabel}`
                   }
                   sx={{
                     borderRadius: "999px",
@@ -1884,15 +1979,46 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                       <Tab label="Decay" />
                       <Tab label="Member scores" />
                       <Tab label="Danger zone" />
+                      <Tab label="Delegates" />
                     </Tabs>
                   </Box>
 
                   <Box component="section" sx={{ p: { xs: 1.5, md: 2.5 }, minWidth: 0 }}>
                     {!isAuthority && (
                       <Alert severity="warning" sx={{ borderRadius: "12px", mb: 1.5 }}>
-                        Connect the authority wallet to make changes. You can still review settings.
+                        {canAward || canReset ? `Delegate permissions: ${[canAward && "award points", canReset && "reset scores"].filter(Boolean).join(", ")}. Space settings require the authority wallet.` : "Connect the authority wallet or an authorized delegate to make changes. You can still review settings."}
                       </Alert>
                     )}
+
+                <TabPanel value={tab} index={7}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 650, mb: 1 }}>Delegate authority</Typography>
+                  <Box sx={{ display: "grid", gap: 1.5, maxWidth: 680 }}>
+                    <Alert severity="info">Delegates can award points and/or reset member scores. You retain authority over the space and can revoke access here.</Alert>
+                    <Button onClick={() => setDelegateRevision((n) => n + 1)} disabled={delegatesLoading || submitting}>Refresh delegates</Button>
+                    {delegateError && <Alert severity="error">{delegateError}</Alert>}
+                    {delegatesLoading ? <Typography>Loading delegates…</Typography> : !delegateError && delegates.length === 0 && <Typography>No delegates yet.</Typography>}
+                    {delegates.map((row) => (
+                      <Box key={row.delegate.toBase58()} sx={{ p: 1.5, border: "1px solid rgba(148,163,184,0.25)", borderRadius: "12px", overflowWrap: "anywhere" }}>
+                        <Typography variant="body2">{row.delegate.toBase58()}</Typography>
+                        <Typography variant="caption">{[row.canAward && "Award points", row.canReset && "Reset scores"].filter(Boolean).join(" · ") || "No active permissions"}</Typography>
+                        <Button disabled={!isAuthority || submitting} onClick={() => {
+                          setDelegateWallet(row.delegate.toBase58()); setDelegateAward(row.canAward); setDelegateReset(row.canReset);
+                        }}>Edit permissions</Button>
+                      </Box>
+                    ))}
+                    <TextField label="Delegate wallet" value={delegateWallet} onChange={(e) => {
+                      const value = e.target.value;
+                      setDelegateWallet(value);
+                      const existing = delegates.find((row) => row.delegate.toBase58() === value.trim());
+                      setDelegateAward(existing?.canAward ?? true); setDelegateReset(existing?.canReset ?? false);
+                    }} disabled={!isAuthority || submitting} error={!!delegateWallet.trim() && !validDelegateWallet}
+                      helperText={delegateWallet.trim() && !validDelegateWallet ? "Enter a valid wallet other than the space authority or system address." : "Enter a wallet to grant access, or select an existing delegate to edit or revoke."} InputProps={{ sx: glassFieldSx }} />
+                    <FormControlLabel control={<Checkbox checked={delegateAward} onChange={(_, checked) => setDelegateAward(checked)} disabled={!isAuthority || submitting} />} label="Can award points" />
+                    <FormControlLabel control={<Checkbox checked={delegateReset} onChange={(_, checked) => setDelegateReset(checked)} disabled={!isAuthority || submitting} />} label="Can reset member scores" />
+                    <Button variant="contained" sx={glassPrimaryBtnSx} onClick={() => handleDelegate(false)} disabled={!isAuthority || submitting || !validDelegateWallet || (!delegateAward && !delegateReset)}>{selectedDelegate ? "Update permissions" : "Grant delegation"}</Button>
+                    <Button color="error" variant="outlined" onClick={() => handleDelegate(true)} disabled={!isAuthority || submitting || !selectedDelegate}>Revoke delegation</Button>
+                  </Box>
+                </TabPanel>
 
                 <TabPanel value={tab} index={0}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 650, mb: 1 }}>
@@ -2086,7 +2212,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
                         <Box sx={{ display: "flex", gap: 1 }}>
                           <Button
                             onClick={handleAddRep}
-                            disabled={!isAuthority || submitting || !repUser.trim() || repAmount <= 0}
+                            disabled={!canAward || submitting || !repUser.trim() || repAmount <= 0}
                             variant="contained"
                             sx={glassPrimaryBtnSx}
                           >
@@ -2095,7 +2221,7 @@ const ReputationManager: React.FC<ReputationManagerProps> = ({
 
                           <Button
                             onClick={handleResetRep}
-                            disabled={!isAuthority || submitting || !repUser.trim()}
+                            disabled={!canReset || submitting || !repUser.trim()}
                             variant="outlined"
                             sx={{
                               ...glassSecondaryBtnSx,
