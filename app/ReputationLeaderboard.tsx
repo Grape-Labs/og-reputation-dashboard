@@ -1,5 +1,8 @@
 "use client";
 
+import useDrawCelebration from "./components/useDrawCelebration";
+import LiveDraw, { ResetDrawDialog } from "./components/LiveDraw";
+
 import React, { FC, useEffect, useMemo, useRef, useState } from "react";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
@@ -39,12 +42,10 @@ import {
   Collapse,
   Avatar,
   TextField,
-  Portal,
 } from "@mui/material";
 
 import DownloadIcon from "@mui/icons-material/Download";
 import LiveTvIcon from "@mui/icons-material/LiveTv";
-import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import DescriptionIcon from "@mui/icons-material/Description";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import ScreenshotMonitorIcon from "@mui/icons-material/ScreenshotMonitor";
@@ -275,6 +276,7 @@ const ReputationLeaderboard: FC<ReputationLeaderboardProps> = (props) => {
   const [snapshotCopied, setSnapshotCopied] = useState(false);
 
   const [streamMode, setStreamMode] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState(false);
   const [showRandomizer, setShowRandomizer] = useState(false);
   const [rewardPresetText, setRewardPresetText] = useState<string>(() => readRewardSettings().presetText);
 
@@ -723,50 +725,7 @@ const handleGetRaffleSelection = () => {
   }
 };
 
-  const fireConfetti = () => {
-    if (typeof window === "undefined") return;
-
-    void import("canvas-confetti")
-      .then((mod: any) => {
-        const confetti = mod?.default ?? mod;
-        const duration = 1400;
-        const animationEnd = Date.now() + duration;
-
-        const defaults = {
-          startVelocity: 35,
-          spread: 55,
-          ticks: 90,
-          zIndex: 9999,
-          scalar: 0.9,
-          colors: ["#8A2BE2", "#C084FC", "#00FFA3", "#03E1FF", "#FFFFFF"],
-        };
-
-        function randomInRange(min: number, max: number) {
-          return Math.random() * (max - min) + min;
-        }
-
-        const interval = window.setInterval(() => {
-          const timeLeft = animationEnd - Date.now();
-          if (timeLeft <= 0) {
-            clearInterval(interval);
-            return;
-          }
-          const particleCount = Math.round(50 * (timeLeft / duration));
-          confetti({
-            ...defaults,
-            particleCount,
-            origin: { x: randomInRange(0.15, 0.35), y: randomInRange(0.15, 0.35) },
-          });
-          confetti({
-            ...defaults,
-            particleCount,
-            origin: { x: randomInRange(0.65, 0.85), y: randomInRange(0.15, 0.35) },
-          });
-        }, 180);
-      })
-      .catch(() => {});
-  };
-  
+  const { celebrate, stopCelebration } = useDrawCelebration();
 
   // SPIN LOGIC with roulette effect
   const spinRoulette = () => {
@@ -786,10 +745,10 @@ const handleGetRaffleSelection = () => {
       return;
     }
 
-    const interval = 100;
     const spins = 30;
     let spinCount = 0;
 
+    stopCelebration();
     setLoadingSpin(true);
     setTimestamp("");
 
@@ -798,7 +757,7 @@ const handleGetRaffleSelection = () => {
       spinCount++;
 
       if (spinCount < spins) {
-        timeoutIdRef.current = setTimeout(spinIteration, interval);
+        timeoutIdRef.current = setTimeout(spinIteration, 45 + 240 * Math.pow(spinCount / spins, 3));
       } else {
         const finalTs = moment().toString();
         setTimestamp(finalTs);
@@ -806,7 +765,7 @@ const handleGetRaffleSelection = () => {
         setWinners((prev) => [...prev, { address: winnerRef.current, ts: finalTs }]);
         setLoadingSpin(false);
         setOpen(true);
-        fireConfetti();
+        celebrate(winners.length + 1 >= drawGoal);
         timeoutIdRef.current = null;
       }
     };
@@ -814,7 +773,13 @@ const handleGetRaffleSelection = () => {
     spinIteration();
   };
 
+  const requestResetRaffle = () => {
+    if (winners.length || loadingSpin) setResetConfirmation(true);
+  };
+
   const handleResetRaffle = () => {
+    stopCelebration();
+    setResetConfirmation(false);
     if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
     timeoutIdRef.current = null;
 
@@ -825,30 +790,6 @@ const handleGetRaffleSelection = () => {
     setOpen(false);
     setHighlightedAddress(null);
   };
-
-  // Keyboard shortcuts in stream mode
-  useEffect(() => {
-    if (!streamMode) return;
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === " " || e.key === "Spacebar" || e.key === "Enter") {
-        e.preventDefault();
-        spinRoulette();
-      }
-      if (e.key === "r" || e.key === "R") {
-        e.preventDefault();
-        handleResetRaffle();
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setStreamMode(false);
-      }
-    };
-
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streamMode, winners.length, loadingSpin]);
 
   useEffect(() => {
     if (!streamMode) return;
@@ -967,286 +908,11 @@ const handleGetRaffleSelection = () => {
   return (
     <Box sx={{ flexGrow: 1, border: "none" }}>
       {/* STREAM MODE */}
-      {streamMode && (
-        <Portal>
-        <Box
-          sx={{
-            position: "fixed",
-            inset: 0,
-            width: "100vw",
-            height: "100dvh",
-            maxHeight: "100dvh",
-            zIndex: 1400,
-            background: "radial-gradient(circle at top, #020617 0%, #020617 40%, #020617 100%)",
-            color: "#e5e7eb",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "flex-start",
-            p: { xs: 1.5, md: 3 },
-            overflowY: "auto",
-            overflowX: "hidden",
-            gap: 1.25,
-          }}
-        >
-          <Box
-            sx={{
-              position: "sticky",
-              top: 0,
-              zIndex: 2,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              width: "min(1100px, 100%)",
-              py: 0.75,
-              px: 1,
-              borderRadius: "12px",
-              background: "rgba(2,6,23,0.68)",
-              backdropFilter: "blur(8px)",
-            }}
-          >
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Live Draw
-            </Typography>
-
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-              <Typography variant="caption" sx={{ opacity: 0.7, display: { xs: "none", sm: "block" } }}>
-                Space / Enter = Draw • R = Reset • Esc = Exit
-              </Typography>
-              <IconButton
-                onClick={() => setStreamMode(false)}
-                sx={{
-                  color: "rgba(248,250,252,0.9)",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(148,163,184,0.6)",
-                  p: 0.75,
-                }}
-              >
-                <FullscreenExitIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          </Box>
-
-          <Box
-            onClick={canDrawNext ? spinRoulette : undefined}
-            role="button"
-            tabIndex={canDrawNext ? 0 : -1}
-            aria-label="Draw next winner"
-            sx={{
-              position: "relative",
-              display: "inline-flex",
-              alignItems: "center",
-              px: 3,
-              py: 1.8,
-              borderRadius: "999px",
-              background: "rgba(15,23,42,0.95)",
-              border: "1px solid rgba(148,163,184,0.7)",
-              backdropFilter: "blur(12px)",
-              minWidth: { xs: 0, sm: 360 },
-              width: { xs: "100%", sm: "auto" },
-              maxWidth: "min(100%, 900px)",
-              justifyContent: "center",
-              animation: loadingSpin ? "winnerGlow 1.4s ease-out infinite" : "none",
-              cursor: canDrawNext ? "pointer" : "default",
-              transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-              "&:hover": canDrawNext
-                ? {
-                    borderColor: "rgba(191,219,254,0.95)",
-                    boxShadow: "0 0 18px rgba(148,163,184,0.25)",
-                  }
-                : undefined,
-              "&::before": loadingSpin
-                ? {
-                    content: '""',
-                    position: "absolute",
-                    inset: -10,
-                    borderRadius: "999px",
-                    border: "1px solid rgba(56,189,248,0.65)",
-                    boxShadow: "0 0 26px rgba(56,189,248,0.55)",
-                    opacity: 0.7,
-                  }
-                : {},
-            }}
-          >
-            <Typography
-              variant="h5"
-              sx={{
-                fontFamily: "monospace",
-                letterSpacing: 1,
-                opacity: pillAddress ? 0.95 : 0.55,
-              }}
-            >
-              {pillAddress
-                ? isMobile
-                  ? shortenString(pillAddress, 8, 8)
-                  : pillAddress
-                : loadingSpin
-                ? "Drawing winner…"
-                : "Ready to draw"}
-            </Typography>
-          </Box>
-
-          {/* Winners list in stream mode */}
-          {winners.length > 0 && (
-            <Box
-              sx={{
-                mt: 1,
-                px: 3,
-                py: 2,
-                borderRadius: "18px",
-                background: "rgba(15,23,42,0.96)",
-                border: "1px solid rgba(148,163,184,0.6)",
-                backdropFilter: "blur(14px)",
-                width: "min(100%, 800px)",
-                maxHeight: { xs: "34dvh", md: "40dvh" },
-                overflowY: "auto",
-                overflowX: "hidden",
-              }}
-            >
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  justifyContent: "space-between",
-                  mb: 1.5,
-                }}
-              >
-                <Typography variant="subtitle1" sx={{ letterSpacing: 1.2, textTransform: "uppercase" }}>
-                  The Vine List
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                  {moment(winners[0].ts).format("LL")}
-                </Typography>
-              </Box>
-
-              {winners.map((w, idx) => (
-                <Box
-                  key={`${w.address}-${w.ts}`}
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    py: 0.7,
-                    borderBottom:
-                      idx === winners.length - 1 ? "none" : "1px dashed rgba(75,85,99,0.7)",
-                  }}
-                >
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                    <Typography variant="body1" sx={{ width: 26, opacity: 0.75, textAlign: "right" }}>
-                      {idx + 1}.
-                    </Typography>
-                    <Typography variant="body1" sx={{ fontFamily: "monospace", letterSpacing: 0.4 }}>
-                      {isMobile ? shortenString(w.address, 8, 8) : w.address}
-                    </Typography>
-                  </Box>
-
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      opacity: 0.8,
-                      fontFeatureSettings: '"tnum" 1',
-                      minWidth: 72,
-                      textAlign: "right",
-                    }}
-                  >
-                    {moment(w.ts).format("HH:mm:ss")}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          )}
-
-          <Box
-            sx={{
-              position: "sticky",
-              bottom: 0,
-              zIndex: 2,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: { xs: "stretch", md: "center" },
-              flexDirection: { xs: "column", md: "row" },
-              width: "min(1100px, 100%)",
-              gap: 1,
-              p: 1,
-              borderRadius: "12px",
-              background: "rgba(2,6,23,0.72)",
-              backdropFilter: "blur(8px)",
-            }}
-          >
-            <Typography variant="caption" sx={{ opacity: 0.65 }}>
-              Draws: {winners.length}/{drawGoal} • Eligible: {raffleEligibleCount}
-              {drawGoalCapped ? " (capped by eligibility)" : ""} • Chance ∝ reputation points
-            </Typography>
-
-            <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
-              <TextField
-                size="small"
-                type="number"
-                value={targetDrawCount}
-                onChange={(e) => handleDrawCountChange(e.target.value)}
-                inputProps={{ min: MIN_DRAW_COUNT, max: MAX_DRAW_COUNT, step: 1, "aria-label": "target draws" }}
-                sx={{
-                  width: 92,
-                  "& .MuiOutlinedInput-root": {
-                    height: 36,
-                    color: "rgba(248,250,252,0.95)",
-                    background: "rgba(15,23,42,0.55)",
-                  },
-                  "& .MuiOutlinedInput-notchedOutline": {
-                    borderColor: "rgba(148,163,184,0.8)",
-                  },
-                  "& .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline": {
-                    borderColor: "rgba(191,219,254,0.9)",
-                  },
-                }}
-              />
-              <Button
-                onClick={spinRoulette}
-                disabled={!canDrawNext}
-                sx={{
-                  textTransform: "none",
-                  borderRadius: "18px",
-                  px: 3,
-                  py: 1,
-                  background:
-                    !canDrawNext
-                      ? "rgba(0,200,255,0.3)"
-                      : "rgba(255,255,255,0.12)",
-                  "&:hover": {
-                    background:
-                      !canDrawNext
-                        ? "rgba(0,200,255,0.35)"
-                        : "rgba(255,255,255,0.2)",
-                  },
-                }}
-              >
-                {loadingSpin ? <HourglassBottomIcon sx={{ mr: 1 }} fontSize="small" /> : <LoopIcon sx={{ mr: 1 }} fontSize="small" />}
-                {raffleEligibleCount === 0
-                  ? "No eligible wallets"
-                  : drawLimitReached
-                  ? "All winners drawn"
-                  : "Draw next"}
-              </Button>
-
-              {winners.length > 0 && (
-                <Button
-                  onClick={handleResetRaffle}
-                  variant="outlined"
-                  color="inherit"
-                  sx={{
-                    textTransform: "none",
-                    borderRadius: "18px",
-                    borderColor: "rgba(148,163,184,0.8)",
-                  }}
-                >
-                  Reset
-                </Button>
-              )}
-            </Box>
-          </Box>
-        </Box>
-        </Portal>
-      )}
+      <ResetDrawDialog open={resetConfirmation} count={winners.length} onClose={() => setResetConfirmation(false)} onConfirm={handleResetRaffle} />
+      {streamMode && <LiveDraw winners={winners} address={pillAddress || ""} spinning={loadingSpin} canDraw={canDrawNext}
+        goal={drawGoal} eligible={raffleEligibleCount} target={targetDrawCount} min={MIN_DRAW_COUNT} max={MAX_DRAW_COUNT}
+        weighting="reputation points" confirmingReset={resetConfirmation} onTarget={handleDrawCountChange} onDraw={spinRoulette}
+        onReset={requestResetRaffle} onExit={() => setStreamMode(false)} />}
 
       {/* REPUTATION SUMMARY */}
       <Box
@@ -1836,7 +1502,7 @@ const handleGetRaffleSelection = () => {
 
               {winners.length > 0 && (
                 <Button
-                  onClick={handleResetRaffle}
+                  onClick={requestResetRaffle}
                   size="small"
                   variant="text"
                   sx={{
