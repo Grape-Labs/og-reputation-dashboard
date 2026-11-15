@@ -119,7 +119,7 @@ export default function LiveDraw(p: Props) {
           <Typography sx={{ color: "#a4aec8", fontSize: 11, letterSpacing: 3, mb: 2 }}>{p.spinning ? "DRAWING" : p.address ? `WINNER ${String(p.winners.length).padStart(2, "0")}` : "COMMUNITY. POSSIBILITY. YOUR MOMENT."}</Typography>
           <Typography key={`${p.spinning ? "spin" : "reveal"}-${p.address || "ready"}`} aria-live={p.spinning ? "off" : "polite"} sx={{ fontFamily: p.address ? "monospace" : "inherit", fontSize: { xs: p.address ? 18 : 28, md: p.address ? 30 : 44 }, fontWeight: 600, overflowWrap: "anywhere", animation: p.spinning ? "drawRoll .12s ease-out both" : "drawReveal .65s cubic-bezier(.16,1,.3,1) both", textShadow: p.spinning ? "0 0 24px #c4b5fd88" : "none" }}>{p.address || "Who will be next?"}</Typography>
           <Box key={p.spinning ? "drawing-fortune" : winnerKey || "ready-fortune"} className={!p.spinning && fortune ? effects.fortune : undefined} sx={{ position: "relative", mt: 2, minHeight: 58 }}>
-            {!p.spinning && fortune && <Typography sx={{ color: "#d9c18c", fontSize: 9, letterSpacing: 3, mb: .75, textTransform: "uppercase" }}>A little fortune for you</Typography>}
+            {!p.spinning && fortune && <Typography sx={{ color: "#d9c18c", fontSize: 9, letterSpacing: 3, mb: .75, textTransform: "uppercase" }}>A little Grape fortune</Typography>}
             <Typography aria-live="polite" sx={{ color: !p.spinning && fortune ? "#d7d3e4" : "#a5b2ce", fontSize: { xs: 13, md: 15 }, lineHeight: 1.7, textWrap: "balance" }}>{p.spinning ? "A little suspense. A new possibility." : fortune || "One draw. One moment in the spotlight."}</Typography>
           </Box>
         </Box>
