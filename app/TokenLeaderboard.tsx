@@ -1,4 +1,5 @@
 // Import necessary modules and components from libraries
+import WarpSpeed from "./components/WarpSpeed";
 import useDrawCelebration from "./components/useDrawCelebration";
 import LiveDraw, { ResetDrawDialog } from "./components/LiveDraw";
 
@@ -474,7 +475,7 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
 
   const headerDate = moment(winners[0].ts).format("LLLL"); // full date/time
 
-  let md = `### 🍇 Raffle Results\n`;
+  let md = `### 🍇 Randomizer Results\n`;
   md += `*${headerDate}*\n\n`;
 
   winners.forEach((w, idx) => {
@@ -581,8 +582,8 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.href = url;
-            link.download = `vine-raffle-winners-${
-              timestamp || "vine-raffle-winners"
+            link.download = `vine-randomizer-selections-${
+              timestamp || "vine-randomizer-selections"
             }.png`;
             document.body.appendChild(link);
             link.click();
@@ -593,8 +594,8 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
-          link.download = `vine-raffle-winners-${
-            timestamp || "vine-raffle-winners"
+          link.download = `vine-randomizer-selections-${
+            timestamp || "vine-randomizer-selections"
           }.png`;
           document.body.appendChild(link);
           link.click();
@@ -1042,9 +1043,11 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                 : "0 0 8px rgba(0,0,0,0.4)",
               transition: "0.3s ease",
               position: "relative",
+              isolation: "isolate",
               overflow: "hidden",
             }}
           >
+            {loadingSpin && <WarpSpeed />}
             {/* Animated top shimmer while spinning */}
             {loadingSpin && (
               <Box
@@ -1076,7 +1079,7 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                 sx={{ letterSpacing: 0.5, opacity: 0.9 }}
               >
                 <Tooltip
-                    title="Chance to be drawn is proportional to token balance. P(win) = walletBalance / totalEligibleBalance"
+                    title="Chance to be selected is proportional to token balance. P(selection) = walletBalance / totalEligibleBalance"
                     arrow
                   >
                     <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>
@@ -1103,11 +1106,11 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                   }}
                 />
                 <Typography variant="caption" sx={{ mr: 1 }}>
-                  {loadingSpin ? "Drawing…" : "Ready"}
+                  {loadingSpin ? "Randomizing…" : "Ready"}
                 </Typography>
 
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  {winners.length}/{drawGoal} drawn
+                  {winners.length}/{drawGoal} selected
                 </Typography>
               </Box>
               
@@ -1209,7 +1212,7 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                               flexWrap: "wrap",
                             }}
                           >
-                            <Tooltip title="Save winners snapshot (image)">
+                            <Tooltip title="Save selections snapshot (image)">
                               <IconButton
                                 sx={{ color: "white", mr: 0.2 }}
                                 onClick={handleCapture}
@@ -1218,7 +1221,7 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                               </IconButton>
                             </Tooltip>
 
-                            <Tooltip title="Copy winners as Markdown (for Discord/notes)">
+                            <Tooltip title="Copy selections as Markdown (for Discord/notes)">
                               <IconButton
                                 sx={{ color: "white", mr: 0.2 }}
                                 onClick={handleCopyWinnersMarkdown}
@@ -1418,8 +1421,8 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                     onChange={(e) => handleRewardPresetChange(e.target.value)}
                     helperText={
                       rewardPresets.length > 0
-                        ? `${rewardPresets.length} draw slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} winners assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
-                        : "Optional. Browser-only format: SYMBOL:AMOUNT or MINT_ADDRESS:AMOUNT, separated by commas; WILDCARD:1 skips a winner."
+                        ? `${rewardPresets.length} selection slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} selections assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
+                        : "Optional. Browser-only format: SYMBOL:AMOUNT or MINT_ADDRESS:AMOUNT, separated by commas; WILDCARD:1 skips a selection."
                     }
                     sx={{
                       "& .MuiOutlinedInput-root": {
@@ -1470,7 +1473,7 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                   type="number"
                   value={targetDrawCount}
                   onChange={(e) => handleDrawCountChange(e.target.value)}
-                  inputProps={{ min: MIN_DRAW_COUNT, max: MAX_DRAW_COUNT, step: 1, "aria-label": "target draws" }}
+                  inputProps={{ min: MIN_DRAW_COUNT, max: MAX_DRAW_COUNT, step: 1, "aria-label": "target selections" }}
                   sx={{
                     width: 92,
                     mb: 0.75,
@@ -1517,8 +1520,8 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
                     {raffleEligibleCount === 0
                       ? "No eligible wallets"
                       : drawLimitReached
-                      ? "All winners drawn"
-                      : "Draw"}
+                      ? "All selections complete"
+                      : "Randomize"}
                   </Typography>
                 </Button>
 
@@ -2096,7 +2099,7 @@ const TokenLeaderboard: FC<TokenLeaderboardProps> = (props) => {
 
                 <Box>
                   <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                    Draw chance
+                    Selection chance
                   </Typography>
                   <Box
                     sx={{

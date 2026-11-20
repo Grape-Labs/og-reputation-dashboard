@@ -1,5 +1,6 @@
 "use client";
 
+import WarpSpeed from "./components/WarpSpeed";
 import useDrawCelebration from "./components/useDrawCelebration";
 import LiveDraw, { ResetDrawDialog } from "./components/LiveDraw";
 
@@ -540,7 +541,7 @@ useEffect(() => {
     if (!winners || winners.length === 0) return "";
     const headerDate = moment(winners[0].ts).format("LLLL");
 
-    let md = `### 🍇 Raffle Results\n`;
+    let md = `### 🍇 Randomizer Results\n`;
     md += `*${headerDate}*\n\n`;
 
     winners.forEach((w, idx) => {
@@ -627,7 +628,7 @@ useEffect(() => {
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.href = url;
-            link.download = `vine-raffle-winners-${timestamp || "vine-raffle-winners"}.png`;
+            link.download = `vine-randomizer-selections-${timestamp || "vine-randomizer-selections"}.png`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -637,7 +638,7 @@ useEffect(() => {
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
-          link.download = `vine-raffle-winners-${timestamp || "vine-raffle-winners"}.png`;
+          link.download = `vine-randomizer-selections-${timestamp || "vine-randomizer-selections"}.png`;
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
@@ -1161,9 +1162,11 @@ const handleGetRaffleSelection = () => {
               boxShadow: loadingSpin ? "0 0 18px rgba(0,200,255,0.25)" : "0 0 8px rgba(0,0,0,0.4)",
               transition: "0.3s ease",
               position: "relative",
+              isolation: "isolate",
               overflow: "hidden",
             }}
           >
+            {loadingSpin && <WarpSpeed />}
             {loadingSpin && (
               <Box
                 sx={{
@@ -1181,7 +1184,7 @@ const handleGetRaffleSelection = () => {
 
             <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", mb: 1.5, gap: 1 }}>
               <Tooltip
-                title="Chance to be drawn is proportional to points. P(win) = points / totalEligiblePoints"
+                title="Chance to be selected is proportional to points. P(selection) = points / totalEligiblePoints"
                 arrow
               >
                 <Typography variant="subtitle2" sx={{ opacity: 0.9, cursor: "help" }}>
@@ -1199,10 +1202,10 @@ const handleGetRaffleSelection = () => {
                   }}
                 />
                 <Typography variant="caption" sx={{ mr: 1 }}>
-                  {loadingSpin ? "Drawing…" : "Ready"}
+                  {loadingSpin ? "Randomizing…" : "Ready"}
                 </Typography>
                 <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  {winners.length}/{drawGoal} drawn
+                  {winners.length}/{drawGoal} selected
                 </Typography>
               </Box>
             </Box>
@@ -1268,13 +1271,13 @@ const handleGetRaffleSelection = () => {
                           flexWrap: "wrap",
                         }}
                       >
-                        <Tooltip title="Save winners snapshot (image)">
+                        <Tooltip title="Save selections snapshot (image)">
                           <IconButton sx={{ color: "white", mr: 0.2 }} onClick={handleCapture}>
                             <ScreenshotMonitorIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
 
-                        <Tooltip title="Copy winners as Markdown (for Discord/notes)">
+                        <Tooltip title="Copy selections as Markdown (for Discord/notes)">
                           <IconButton sx={{ color: "white", mr: 0.2 }} onClick={handleCopyWinnersMarkdown}>
                             <DescriptionIcon fontSize="small" />
                           </IconButton>
@@ -1410,8 +1413,8 @@ const handleGetRaffleSelection = () => {
                 onChange={(e) => handleRewardPresetChange(e.target.value)}
                 helperText={
                   rewardPresets.length > 0
-                    ? `${rewardPresets.length} draw slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} winners assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
-                    : "Optional. Browser-only format: SYMBOL:AMOUNT or MINT_ADDRESS:AMOUNT, separated by commas; WILDCARD:1 skips a winner."
+                    ? `${rewardPresets.length} selection slots configured. ${rewardAssignmentsCount}/${rewardPresets.length} selections assigned. ${rewardMarkdownEntriesCount} reward entries will be copied${wildcardCount > 0 ? `, ${wildcardCount} wildcard slot${wildcardCount === 1 ? "" : "s"} skipped` : ""}.`
+                    : "Optional. Browser-only format: SYMBOL:AMOUNT or MINT_ADDRESS:AMOUNT, separated by commas; WILDCARD:1 skips a selection."
                 }
                 sx={{
                   "& .MuiOutlinedInput-root": {
@@ -1456,7 +1459,7 @@ const handleGetRaffleSelection = () => {
                 type="number"
                 value={targetDrawCount}
                 onChange={(e) => handleDrawCountChange(e.target.value)}
-                inputProps={{ min: MIN_DRAW_COUNT, max: MAX_DRAW_COUNT, step: 1, "aria-label": "target draws" }}
+                inputProps={{ min: MIN_DRAW_COUNT, max: MAX_DRAW_COUNT, step: 1, "aria-label": "target selections" }}
                 sx={{
                   width: 92,
                   "& .MuiOutlinedInput-root": {
@@ -1496,8 +1499,8 @@ const handleGetRaffleSelection = () => {
                 {raffleEligibleCount === 0
                   ? "No eligible wallets"
                   : drawLimitReached
-                  ? "All winners drawn"
-                  : "Draw"}
+                  ? "All selections complete"
+                  : "Randomize"}
               </Button>
 
               {winners.length > 0 && (
@@ -1796,7 +1799,7 @@ const handleGetRaffleSelection = () => {
 
             <Box>
               <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                Draw chance
+                Selection chance
               </Typography>
               <Typography variant="body1" sx={{ fontWeight: 800 }}>
                 {repLoading || selectedDrawChancePct == null

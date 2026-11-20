@@ -1,9 +1,49 @@
+.liveScreen > :not(.atmosphere) {
+  flex-shrink: 0;
+}
+.randomizeButton {
+  color: #fff !important;
+  background: #7550d5 !important;
+}
+.randomizeButton:hover { background: #8965e6 !important; }
+.randomizeButton:disabled {
+  background: #303b55 !important;
+  color: #b8c4da !important;
+}
 .atmosphere {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+}
+.warp {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, #8950e618, transparent 65%);
+  mask-image: radial-gradient(ellipse at center, transparent 8%, #0009 35%, #000 80%);
+  animation: warpEnter .6s ease-out both;
+}
+.warpRay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100px;
+  height: 2px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, currentColor);
+  transform-origin: left center;
+  animation: warpTravel 1s linear infinite;
+}
+@keyframes warpEnter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes warpTravel {
+  0% { opacity: 0; transform: rotate(var(--angle)) translateX(12px) scaleX(.03); }
+  15% { opacity: .3; }
+  70% { opacity: .8; }
+  100% { opacity: 0; transform: rotate(var(--angle)) translateX(var(--travel)) scaleX(2.8); }
 }
 .aurora {
   position: absolute;
@@ -114,6 +154,7 @@
 @keyframes medal { from { opacity: 0; transform: scale(.5) rotate(-30deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
 @keyframes unfold { from { opacity: 0; transform: translateY(10px) scaleX(.85); } to { opacity: 1; transform: translateY(0) scaleX(1); } }
 @media (prefers-reduced-motion: reduce) {
+  .warp { display: none; }
   .atmosphere *, .medallion, .fortune { animation: none; }
   .reveal { display: none; }
 }
